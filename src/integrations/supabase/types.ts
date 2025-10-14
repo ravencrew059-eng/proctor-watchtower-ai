@@ -14,13 +14,163 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      exam_answers: {
+        Row: {
+          answer: string | null
+          created_at: string | null
+          exam_id: string | null
+          id: string
+          question_number: number
+          updated_at: string | null
+        }
+        Insert: {
+          answer?: string | null
+          created_at?: string | null
+          exam_id?: string | null
+          id?: string
+          question_number: number
+          updated_at?: string | null
+        }
+        Update: {
+          answer?: string | null
+          created_at?: string | null
+          exam_id?: string | null
+          id?: string
+          question_number?: number
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exam_answers_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      exams: {
+        Row: {
+          completed_at: string | null
+          created_at: string | null
+          duration_minutes: number | null
+          id: string
+          started_at: string | null
+          status: string | null
+          student_id: string | null
+          subject_code: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string | null
+          duration_minutes?: number | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          student_id?: string | null
+          subject_code: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string | null
+          duration_minutes?: number | null
+          id?: string
+          started_at?: string | null
+          status?: string | null
+          student_id?: string | null
+          subject_code?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "exams_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      students: {
+        Row: {
+          created_at: string | null
+          email: string
+          id: string
+          name: string
+          subject_code: string
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          id?: string
+          name: string
+          subject_code: string
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          id?: string
+          name?: string
+          subject_code?: string
+        }
+        Relationships: []
+      }
+      violations: {
+        Row: {
+          details: Json | null
+          exam_id: string | null
+          id: string
+          image_url: string | null
+          severity: string | null
+          student_id: string | null
+          timestamp: string | null
+          violation_type: string
+        }
+        Insert: {
+          details?: Json | null
+          exam_id?: string | null
+          id?: string
+          image_url?: string | null
+          severity?: string | null
+          student_id?: string | null
+          timestamp?: string | null
+          violation_type: string
+        }
+        Update: {
+          details?: Json | null
+          exam_id?: string | null
+          id?: string
+          image_url?: string | null
+          severity?: string | null
+          student_id?: string | null
+          timestamp?: string | null
+          violation_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "violations_exam_id_fkey"
+            columns: ["exam_id"]
+            isOneToOne: false
+            referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "violations_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      generate_subject_code: {
+        Args: Record<PropertyKey, never>
+        Returns: string
+      }
     }
     Enums: {
       [_ in never]: never
