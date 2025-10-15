@@ -90,12 +90,53 @@ export type Database = {
           },
         ]
       }
+      sessions: {
+        Row: {
+          calibrated_pitch: number | null
+          calibrated_yaw: number | null
+          end_time: string | null
+          id: string
+          start_time: string | null
+          status: string | null
+          student_id: string
+          student_name: string
+          total_frames: number | null
+          violation_count: number | null
+        }
+        Insert: {
+          calibrated_pitch?: number | null
+          calibrated_yaw?: number | null
+          end_time?: string | null
+          id?: string
+          start_time?: string | null
+          status?: string | null
+          student_id: string
+          student_name: string
+          total_frames?: number | null
+          violation_count?: number | null
+        }
+        Update: {
+          calibrated_pitch?: number | null
+          calibrated_yaw?: number | null
+          end_time?: string | null
+          id?: string
+          start_time?: string | null
+          status?: string | null
+          student_id?: string
+          student_name?: string
+          total_frames?: number | null
+          violation_count?: number | null
+        }
+        Relationships: []
+      }
       students: {
         Row: {
           created_at: string | null
           email: string
           id: string
           name: string
+          registered_at: string | null
+          student_id: string | null
           subject_code: string
         }
         Insert: {
@@ -103,6 +144,8 @@ export type Database = {
           email: string
           id?: string
           name: string
+          registered_at?: string | null
+          student_id?: string | null
           subject_code: string
         }
         Update: {
@@ -110,6 +153,8 @@ export type Database = {
           email?: string
           id?: string
           name?: string
+          registered_at?: string | null
+          student_id?: string | null
           subject_code?: string
         }
         Relationships: []
