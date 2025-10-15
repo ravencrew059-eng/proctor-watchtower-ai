@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
+import { aiDetector } from "@/utils/aiDetection";
 
 const StudentVerify = () => {
   const navigate = useNavigate();
@@ -18,6 +19,7 @@ const StudentVerify = () => {
   });
   const [verifying, setVerifying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
     const data = sessionStorage.getItem('studentData');
@@ -27,6 +29,13 @@ const StudentVerify = () => {
       return;
     }
     setStudentData(JSON.parse(data));
+
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+      aiDetector.cleanup();
+    };
   }, [navigate]);
 
   const startVerification = async () => {
@@ -36,7 +45,7 @@ const StudentVerify = () => {
     setCurrentStep(1);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
+        video: { width: 640, height: 480 }, 
         audio: true 
       });
       
@@ -44,59 +53,105 @@ const StudentVerify = () => {
         videoRef.current.srcObject = stream;
       }
 
+      streamRef.current = stream;
+
+      // Initialize AI detector
+      await aiDetector.initialize();
+
       setChecks(prev => ({
         ...prev,
         camera: { status: 'success', message: 'Camera access granted' }
       }));
 
       // Step 2: Lighting Check
-      setTimeout(() => {
+      setTimeout(async () => {
         setCurrentStep(2);
         setChecks(prev => ({
           ...prev,
           lighting: { status: 'checking', message: 'Analyzing lighting conditions...' }
         }));
 
-        setTimeout(() => {
+        if (!videoRef.current) return;
+
+        const lightingResult = await aiDetector.checkLighting(videoRef.current);
+        console.log('Lighting:', lightingResult);
+
+        if (!lightingResult.isGood) {
           setChecks(prev => ({
             ...prev,
-            lighting: { status: 'success', message: 'Good lighting detected' }
+            lighting: { status: 'error', message: `Poor lighting (brightness: ${Math.round(lightingResult.brightness)})` }
           }));
+          toast.error("Please improve lighting conditions");
+          setVerifying(false);
+          return;
+        }
 
-          // Step 3: Face Detection
+        setChecks(prev => ({
+          ...prev,
+          lighting: { status: 'success', message: 'Good lighting detected' }
+        }));
+
+        // Step 3: Face Detection
+        setTimeout(async () => {
           setCurrentStep(3);
           setChecks(prev => ({
             ...prev,
             face: { status: 'checking', message: 'Detecting face...' }
           }));
 
-          setTimeout(() => {
+          if (!videoRef.current) return;
+
+          const faceCount = await aiDetector.detectFaces(videoRef.current);
+          console.log('Faces detected:', faceCount);
+
+          if (faceCount === 0) {
             setChecks(prev => ({
               ...prev,
-              face: { status: 'success', message: 'Single person detected' }
+              face: { status: 'error', message: 'No face detected' }
             }));
+            toast.error("Please position yourself in front of camera");
+            setVerifying(false);
+            return;
+          } else if (faceCount > 1) {
+            setChecks(prev => ({
+              ...prev,
+              face: { status: 'error', message: 'Multiple faces detected' }
+            }));
+            toast.error("Only one person allowed");
+            setVerifying(false);
+            return;
+          }
 
-            // Step 4: Audio Check
+          setChecks(prev => ({
+            ...prev,
+            face: { status: 'success', message: 'Single person detected' }
+          }));
+
+          // Step 4: Audio Check
+          setTimeout(async () => {
             setCurrentStep(4);
             setChecks(prev => ({
               ...prev,
               audio: { status: 'checking', message: 'Testing microphone...' }
             }));
 
-            setTimeout(() => {
-              setChecks(prev => ({
-                ...prev,
-                audio: { status: 'success', message: 'Microphone working' }
-              }));
+            if (!streamRef.current) return;
 
-              // All checks complete
-              toast.success("Environment verification complete!");
-              setTimeout(() => {
-                navigate('/student/exam');
-              }, 1500);
+            const audioLevel = await aiDetector.analyzeAudioLevel(streamRef.current);
+            console.log('Audio level:', audioLevel);
+
+            setChecks(prev => ({
+              ...prev,
+              audio: { status: 'success', message: 'Microphone working' }
+            }));
+
+            // All checks complete
+            toast.success("Environment verification complete!");
+            setTimeout(() => {
+              navigate('/student/exam');
             }, 1500);
-          }, 2000);
-        }, 1500);
+          }, 1500);
+        }, 2000);
       }, 1000);
 
     } catch (error) {

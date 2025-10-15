@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import ViolationChart from "@/components/ViolationChart";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -28,9 +29,26 @@ const AdminDashboard = () => {
 
     loadDashboardData();
 
-    // Poll for updates every 5 seconds
-    const interval = setInterval(loadDashboardData, 5000);
-    return () => clearInterval(interval);
+    // Subscribe to real-time violations
+    const violationSubscription = supabase
+      .channel('violations-channel')
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'violations' },
+        (payload) => {
+          console.log('New violation detected:', payload);
+          toast.error('New violation detected!');
+          loadDashboardData();
+        }
+      )
+      .subscribe();
+
+    // Poll for updates every 10 seconds
+    const interval = setInterval(loadDashboardData, 10000);
+
+    return () => {
+      clearInterval(interval);
+      supabase.removeChannel(violationSubscription);
+    };
   }, [navigate]);
 
   const loadDashboardData = async () => {
@@ -309,12 +327,44 @@ const AdminDashboard = () => {
           </TabsContent>
 
           <TabsContent value="analytics">
-            <Card>
+            <ViolationChart violations={violations} />
+            
+            <Card className="mt-6">
               <CardContent className="p-6">
-                <h2 className="text-xl font-bold mb-4">Analytics Dashboard</h2>
-                <p className="text-muted-foreground text-center py-12">
-                  Visual analytics charts will be implemented here using recharts library
-                </p>
+                <h2 className="text-xl font-bold mb-6">Violation Evidence Gallery</h2>
+                
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {violations
+                    .filter(v => v.image_url)
+                    .map((violation) => (
+                      <div key={violation.id} className="group relative">
+                        <div className="aspect-video rounded-lg overflow-hidden bg-muted border-2 border-border hover:border-primary transition-colors">
+                          <img 
+                            src={violation.image_url} 
+                            alt={violation.violation_type}
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.src = '/placeholder.svg';
+                            }}
+                          />
+                        </div>
+                        <div className="mt-2">
+                          <Badge variant={violation.severity === 'high' ? 'destructive' : 'secondary'} className="text-xs">
+                            {violation.violation_type.replace('_', ' ')}
+                          </Badge>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            {formatDate(violation.timestamp)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                </div>
+
+                {violations.filter(v => v.image_url).length === 0 && (
+                  <div className="text-center py-12 text-muted-foreground">
+                    No violation evidence images found
+                  </div>
+                )}
               </CardContent>
             </Card>
           </TabsContent>

@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Clock, VideoOff, Video, Save } from "lucide-react";
+import { Shield, Clock, VideoOff, Video, Save, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
+import { aiDetector } from "@/utils/aiDetection";
+import { violationLogger } from "@/utils/violationLogger";
 
 const StudentExam = () => {
   const navigate = useNavigate();
@@ -14,8 +17,10 @@ const StudentExam = () => {
   const [timeRemaining, setTimeRemaining] = useState(3600); // 60 minutes in seconds
   const [answers, setAnswers] = useState<{ [key: number]: string }>({});
   const [examId, setExamId] = useState<string | null>(null);
+  const [violationCount, setViolationCount] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const questions = [
     { id: 1, text: "What is the capital of France?" },
@@ -36,8 +41,8 @@ const StudentExam = () => {
     // Get exam ID and start exam
     startExam(parsedData);
 
-    // Start camera
-    startCamera();
+    // Start camera and AI monitoring
+    initializeMonitoring();
 
     // Timer countdown
     const timer = setInterval(() => {
@@ -53,21 +58,112 @@ const StudentExam = () => {
 
     // Track tab visibility for violation detection
     const handleVisibilityChange = () => {
-      if (document.hidden) {
+      if (document.hidden && examId && studentData) {
         recordViolation('tab_switch', 'Student switched tabs');
       }
     };
 
+    // Prevent copy/paste
+    const handleCopyPaste = (e: Event) => {
+      e.preventDefault();
+      if (examId && studentData) {
+        recordViolation('copy_paste', 'Copy/paste attempted');
+      }
+    };
+
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('copy', handleCopyPaste);
+    document.addEventListener('paste', handleCopyPaste);
 
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('copy', handleCopyPaste);
+      document.removeEventListener('paste', handleCopyPaste);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current);
+      }
+      aiDetector.cleanup();
     };
   }, [navigate]);
+
+  const initializeMonitoring = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480 }, 
+        audio: true 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      
+      streamRef.current = stream;
+      setCameraActive(true);
+
+      // Initialize AI detector
+      await aiDetector.initialize();
+      console.log('AI monitoring initialized');
+
+      // Start AI detection loop
+      startAIMonitoring();
+    } catch (error) {
+      console.error('Camera error:', error);
+      toast.error("Camera access required for exam");
+    }
+  };
+
+  const startAIMonitoring = () => {
+    // Run detection every 3 seconds
+    detectionIntervalRef.current = setInterval(async () => {
+      if (!videoRef.current || !streamRef.current || !examId || !studentData) return;
+
+      try {
+        // Object detection
+        const violations = await aiDetector.detectObjects(videoRef.current);
+        
+        for (const violation of violations) {
+          const snapshot = aiDetector.captureSnapshot(videoRef.current);
+          
+          await violationLogger.logDetectionViolation(
+            examId,
+            studentData.id,
+            violation,
+            snapshot
+          );
+
+          setViolationCount(prev => prev + 1);
+          
+          toast.error(`Violation: ${violation.type.replace('_', ' ')}`, {
+            description: 'This incident has been reported to the admin'
+          });
+        }
+
+        // Audio check
+        const audioLevel = await aiDetector.analyzeAudioLevel(streamRef.current);
+        if (audioLevel.isNoisy) {
+          const shouldLog = aiDetector.incrementViolation('audioNoise');
+          if (shouldLog) {
+            const snapshot = aiDetector.captureSnapshot(videoRef.current);
+            await violationLogger.logDetectionViolation(
+              examId,
+              studentData.id,
+              { type: 'audio_noise', confidence: 0.8, timestamp: new Date() },
+              snapshot
+            );
+            setViolationCount(prev => prev + 1);
+            aiDetector.resetViolation('audioNoise');
+            toast.warning('Suspicious audio detected');
+          }
+        }
+      } catch (error) {
+        console.error('AI monitoring error:', error);
+      }
+    }, 3000);
+  };
 
   const startExam = async (data: any) => {
     try {
@@ -95,39 +191,32 @@ const StudentExam = () => {
     }
   };
 
-  const startCamera = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: true, 
-        audio: true 
-      });
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-      }
-      
-      streamRef.current = stream;
-      setCameraActive(true);
-    } catch (error) {
-      console.error('Camera error:', error);
-      toast.error("Camera access required for exam");
-    }
-  };
-
   const recordViolation = async (type: string, details: string) => {
     if (!examId || !studentData) return;
 
     try {
-      await supabase
-        .from('violations')
-        .insert({
-          exam_id: examId,
-          student_id: studentData.id,
-          violation_type: type,
-          severity: 'medium',
-          details: { message: details }
-        });
+      const snapshot = videoRef.current ? aiDetector.captureSnapshot(videoRef.current) : '';
+      
+      if (snapshot) {
+        await violationLogger.logDetectionViolation(
+          examId,
+          studentData.id,
+          { type: type as any, confidence: 1.0, timestamp: new Date() },
+          snapshot
+        );
+      } else {
+        await supabase
+          .from('violations')
+          .insert({
+            exam_id: examId,
+            student_id: studentData.id,
+            violation_type: type,
+            severity: 'medium',
+            details: { message: details }
+          });
+      }
 
+      setViolationCount(prev => prev + 1);
       toast.warning("Violation recorded: " + details);
     } catch (error) {
       console.error('Error recording violation:', error);
@@ -212,9 +301,15 @@ const StudentExam = () => {
               <p className="text-xs text-muted-foreground">Exam in Progress</p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground">Subject Code</p>
-            <p className="text-sm font-mono font-semibold">{studentData.subjectCode}</p>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-warning" />
+              <span className="text-sm font-semibold">Violations: {violationCount}</span>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground">Subject Code</p>
+              <p className="text-sm font-mono font-semibold">{studentData.subjectCode}</p>
+            </div>
           </div>
         </div>
       </header>
@@ -294,9 +389,16 @@ const StudentExam = () => {
                   />
                 </div>
 
-                <p className="text-xs text-center text-muted-foreground">
-                  {cameraActive ? "Camera Active" : "Camera Inactive"}
-                </p>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground">
+                    {cameraActive ? "AI Monitoring Active" : "Camera Inactive"}
+                  </span>
+                  {cameraActive && (
+                    <Badge variant="outline" className="text-xs">
+                      Live
+                    </Badge>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </div>
