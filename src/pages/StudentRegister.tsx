@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, ArrowLeft } from "lucide-react";
+import { Shield, ArrowLeft, Camera } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,12 +15,106 @@ const StudentRegister = () => {
     name: "",
     email: "",
   });
+  const [faceCapture, setFaceCapture] = useState(false);
+  const [faceCaptured, setFaceCaptured] = useState(false);
+  const [faceImageUrl, setFaceImageUrl] = useState("");
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const startFaceCapture = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { width: 640, height: 480 } 
+      });
+      
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+      }
+      
+      streamRef.current = stream;
+      setFaceCapture(true);
+    } catch (error) {
+      console.error('Camera error:', error);
+      toast.error("Camera access required for face registration");
+    }
+  };
+
+  const captureFaceImage = () => {
+    if (!videoRef.current) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.width = videoRef.current.videoWidth;
+    canvas.height = videoRef.current.videoHeight;
+    const ctx = canvas.getContext('2d');
+    
+    if (!ctx) return;
+    
+    ctx.drawImage(videoRef.current, 0, 0);
+    const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+    
+    setFaceImageUrl(imageDataUrl);
+    setFaceCaptured(true);
+    
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+    }
+    
+    setFaceCapture(false);
+    toast.success("Face captured successfully!");
+  };
+
+  const retakeFaceImage = () => {
+    setFaceCaptured(false);
+    setFaceImageUrl("");
+    startFaceCapture();
+  };
+
+  const uploadFaceImage = async (studentId: string, studentName: string): Promise<string> => {
+    try {
+      const response = await fetch(faceImageUrl);
+      const blob = await response.blob();
+      
+      const fileName = `${studentId}/${studentName.replace(/\s+/g, '_')}_${Date.now()}.jpg`;
+      
+      const { data, error } = await supabase.storage
+        .from('face-registrations')
+        .upload(fileName, blob, {
+          contentType: 'image/jpeg',
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) throw error;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('face-registrations')
+        .getPublicUrl(fileName);
+
+      return publicUrl;
+    } catch (error) {
+      console.error('Error uploading face image:', error);
+      throw error;
+    }
+  };
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     
     if (!formData.name.trim() || !formData.email.trim()) {
       toast.error("Please fill in all fields");
+      return;
+    }
+
+    if (!faceCaptured) {
+      toast.error("Please capture your face image for registration");
       return;
     }
 
@@ -34,7 +128,7 @@ const StudentRegister = () => {
       
       const subjectCode = codeData;
 
-      // Insert student
+      // Insert student (without face_image_url first)
       const { data: studentData, error: studentError } = await supabase
         .from('students')
         .insert({
@@ -46,6 +140,15 @@ const StudentRegister = () => {
         .single();
 
       if (studentError) throw studentError;
+
+      // Upload face image
+      const faceUrl = await uploadFaceImage(studentData.id, studentData.name);
+      
+      // Update student with face image URL
+      await supabase
+        .from('students')
+        .update({ face_image_url: faceUrl })
+        .eq('id', studentData.id);
 
       // Create exam session
       const { error: examError } = await supabase
@@ -138,7 +241,63 @@ const StudentRegister = () => {
                 />
               </div>
 
-              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+              {/* Face Registration */}
+              <div className="space-y-2">
+                <Label>Face Registration</Label>
+                {!faceCapture && !faceCaptured && (
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    className="w-full" 
+                    onClick={startFaceCapture}
+                  >
+                    <Camera className="w-4 h-4 mr-2" />
+                    Capture Face
+                  </Button>
+                )}
+                
+                {faceCapture && (
+                  <div className="space-y-2">
+                    <div className="aspect-video bg-muted rounded-lg overflow-hidden">
+                      <video 
+                        ref={videoRef} 
+                        autoPlay 
+                        muted 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <Button 
+                      type="button" 
+                      className="w-full" 
+                      onClick={captureFaceImage}
+                    >
+                      Take Photo
+                    </Button>
+                  </div>
+                )}
+                
+                {faceCaptured && faceImageUrl && (
+                  <div className="space-y-2">
+                    <div className="aspect-video bg-muted rounded-lg overflow-hidden">
+                      <img 
+                        src={faceImageUrl} 
+                        alt="Captured face" 
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      className="w-full" 
+                      onClick={retakeFaceImage}
+                    >
+                      Retake Photo
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <Button type="submit" className="w-full" size="lg" disabled={loading || !faceCaptured}>
                 {loading ? "Registering..." : "Register & Get Exam Code"}
               </Button>
 

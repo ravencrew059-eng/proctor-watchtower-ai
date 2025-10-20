@@ -40,6 +40,7 @@ export class ViolationLogger {
   async uploadSnapshot(
     examId: string,
     studentId: string,
+    studentName: string,
     imageDataUrl: string,
     violationType: string
   ): Promise<string> {
@@ -48,7 +49,10 @@ export class ViolationLogger {
       const response = await fetch(imageDataUrl);
       const blob = await response.blob();
       
-      const fileName = `${examId}/${studentId}/${violationType}_${Date.now()}.jpg`;
+      // Organize by student name
+      const sanitizedName = studentName.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '');
+      const timestamp = new Date().toISOString().replace(/:/g, '-').split('.')[0];
+      const fileName = `${sanitizedName}/${examId}/${violationType}_${timestamp}.jpg`;
       
       const { data, error } = await supabase.storage
         .from('violation-evidence')
@@ -75,14 +79,16 @@ export class ViolationLogger {
   async logDetectionViolation(
     examId: string,
     studentId: string,
+    studentName: string,
     detection: DetectionResult,
     snapshot: string
   ) {
     try {
-      // Upload snapshot
+      // Upload snapshot with student name
       const imageUrl = await this.uploadSnapshot(
         examId,
         studentId,
+        studentName,
         snapshot,
         detection.type
       );

@@ -18,15 +18,10 @@ const StudentExam = () => {
   const [answers, setAnswers] = useState<{ [key: number]: string }>({});
   const [examId, setExamId] = useState<string | null>(null);
   const [violationCount, setViolationCount] = useState(0);
+  const [questions, setQuestions] = useState<any[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  const questions = [
-    { id: 1, text: "What is the capital of France?" },
-    { id: 2, text: "Explain the concept of object-oriented programming." },
-    { id: 3, text: "What are the three main types of machine learning?" },
-  ];
 
   useEffect(() => {
     const data = sessionStorage.getItem('studentData');
@@ -40,6 +35,9 @@ const StudentExam = () => {
 
     // Get exam ID and start exam
     startExam(parsedData);
+    
+    // Load exam questions
+    loadExamQuestions();
 
     // Start camera and AI monitoring
     initializeMonitoring();
@@ -131,6 +129,7 @@ const StudentExam = () => {
           await violationLogger.logDetectionViolation(
             examId,
             studentData.id,
+            studentData.name,
             violation,
             snapshot
           );
@@ -151,6 +150,7 @@ const StudentExam = () => {
             await violationLogger.logDetectionViolation(
               examId,
               studentData.id,
+              studentData.name,
               { type: 'audio_noise', confidence: 0.8, timestamp: new Date() },
               snapshot
             );
@@ -163,6 +163,31 @@ const StudentExam = () => {
         console.error('AI monitoring error:', error);
       }
     }, 3000);
+  };
+
+  const loadExamQuestions = async () => {
+    try {
+      // Load questions from the first available template (or implement template selection)
+      const { data: questionsData, error } = await supabase
+        .from('exam_questions')
+        .select('*')
+        .order('question_number');
+
+      if (error) throw error;
+
+      if (questionsData && questionsData.length > 0) {
+        setQuestions(questionsData);
+      } else {
+        // Fallback to default questions if no template exists
+        setQuestions([
+          { id: 1, question_number: 1, question_text: "What is the capital of France?", question_type: "short_answer" },
+          { id: 2, question_number: 2, question_text: "Explain the concept of object-oriented programming.", question_type: "short_answer" },
+          { id: 3, question_number: 3, question_text: "What are the three main types of machine learning?", question_type: "short_answer" },
+        ]);
+      }
+    } catch (error) {
+      console.error('Error loading questions:', error);
+    }
   };
 
   const startExam = async (data: any) => {
@@ -201,6 +226,7 @@ const StudentExam = () => {
         await violationLogger.logDetectionViolation(
           examId,
           studentData.id,
+          studentData.name,
           { type: type as any, confidence: 1.0, timestamp: new Date() },
           snapshot
         );
@@ -327,15 +353,34 @@ const StudentExam = () => {
                     <div key={question.id} className="space-y-3">
                       <div>
                         <h3 className="font-semibold mb-1">Question {index + 1}</h3>
-                        <p className="text-muted-foreground">{question.text}</p>
+                        <p className="text-muted-foreground">{question.question_text || question.text}</p>
                       </div>
-                      <Textarea
-                        placeholder="Type your answer here..."
-                        value={answers[question.id] || ''}
-                        onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
-                        rows={6}
-                        className="resize-none"
-                      />
+                      
+                      {question.question_type === 'mcq' && question.options ? (
+                        <div className="space-y-2">
+                          {Object.entries(question.options).map(([key, value]) => (
+                            <label key={key} className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
+                              <input
+                                type="radio"
+                                name={`question-${question.id}`}
+                                value={key}
+                                checked={answers[question.id] === key}
+                                onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
+                                className="w-4 h-4"
+                              />
+                              <span className="text-sm">{key.toUpperCase()}. {value as string}</span>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <Textarea
+                          placeholder="Type your answer here..."
+                          value={answers[question.id] || ''}
+                          onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
+                          rows={6}
+                          className="resize-none"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Activity, Users, AlertTriangle, LogOut, FileText, Download } from "lucide-react";
+import { Shield, Activity, Users, AlertTriangle, LogOut, FileText, Download, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -149,10 +149,16 @@ const AdminDashboard = () => {
               <p className="text-sm text-muted-foreground">Admin Dashboard</p>
             </div>
           </div>
-          <Button variant="outline" onClick={handleLogout}>
-            <LogOut className="w-4 h-4 mr-2" />
-            Logout
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => navigate('/admin/upload-template')}>
+              <Upload className="w-4 h-4 mr-2" />
+              Upload Template
+            </Button>
+            <Button variant="outline" onClick={handleLogout}>
+              <LogOut className="w-4 h-4 mr-2" />
+              Logout
+            </Button>
+          </div>
         </div>
       </header>
 

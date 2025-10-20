@@ -49,11 +49,75 @@ export type Database = {
           },
         ]
       }
+      exam_questions: {
+        Row: {
+          correct_answer: string | null
+          created_at: string | null
+          exam_template_id: string | null
+          id: string
+          options: Json | null
+          points: number | null
+          question_number: number
+          question_text: string
+          question_type: string
+        }
+        Insert: {
+          correct_answer?: string | null
+          created_at?: string | null
+          exam_template_id?: string | null
+          id?: string
+          options?: Json | null
+          points?: number | null
+          question_number: number
+          question_text: string
+          question_type?: string
+        }
+        Update: {
+          correct_answer?: string | null
+          created_at?: string | null
+          exam_template_id?: string | null
+          id?: string
+          options?: Json | null
+          points?: number | null
+          question_number?: number
+          question_text?: string
+          question_type?: string
+        }
+        Relationships: []
+      }
+      exam_templates: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          template_name: string
+          total_questions: number | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          template_name: string
+          total_questions?: number | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          template_name?: string
+          total_questions?: number | null
+        }
+        Relationships: []
+      }
       exams: {
         Row: {
           completed_at: string | null
           created_at: string | null
           duration_minutes: number | null
+          exam_template_id: string | null
           id: string
           started_at: string | null
           status: string | null
@@ -64,6 +128,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           duration_minutes?: number | null
+          exam_template_id?: string | null
           id?: string
           started_at?: string | null
           status?: string | null
@@ -74,6 +139,7 @@ export type Database = {
           completed_at?: string | null
           created_at?: string | null
           duration_minutes?: number | null
+          exam_template_id?: string | null
           id?: string
           started_at?: string | null
           status?: string | null
@@ -81,6 +147,13 @@ export type Database = {
           subject_code?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "exams_exam_template_id_fkey"
+            columns: ["exam_template_id"]
+            isOneToOne: false
+            referencedRelation: "exam_templates"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "exams_student_id_fkey"
             columns: ["student_id"]
@@ -133,6 +206,7 @@ export type Database = {
         Row: {
           created_at: string | null
           email: string
+          face_image_url: string | null
           id: string
           name: string
           registered_at: string | null
@@ -142,6 +216,7 @@ export type Database = {
         Insert: {
           created_at?: string | null
           email: string
+          face_image_url?: string | null
           id?: string
           name: string
           registered_at?: string | null
@@ -151,6 +226,7 @@ export type Database = {
         Update: {
           created_at?: string | null
           email?: string
+          face_image_url?: string | null
           id?: string
           name?: string
           registered_at?: string | null
