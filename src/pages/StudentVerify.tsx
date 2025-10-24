@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Camera, Mic, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { Shield, Camera, Mic, Sun, User, ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -10,14 +10,14 @@ import { aiDetector } from "@/utils/aiDetection";
 const StudentVerify = () => {
   const navigate = useNavigate();
   const [studentData, setStudentData] = useState<any>(null);
-  const [currentStep, setCurrentStep] = useState(0);
   const [checks, setChecks] = useState({
-    camera: { status: 'pending', message: 'Waiting...' },
-    lighting: { status: 'pending', message: 'Waiting...' },
-    face: { status: 'pending', message: 'Waiting...' },
-    audio: { status: 'pending', message: 'Waiting...' },
+    camera: { status: 'waiting', message: 'Waiting...' },
+    microphone: { status: 'waiting', message: 'Waiting...' },
+    lighting: { status: 'waiting', message: 'Waiting...' },
+    face: { status: 'waiting', message: 'Waiting...' },
   });
-  const [verifying, setVerifying] = useState(false);
+  const [verificationStarted, setVerificationStarted] = useState(false);
+  const [progress, setProgress] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -39,10 +39,11 @@ const StudentVerify = () => {
   }, [navigate]);
 
   const startVerification = async () => {
-    setVerifying(true);
-    
+    setVerificationStarted(true);
+    setProgress(0);
+
     // Step 1: Camera Access
-    setCurrentStep(1);
+    setChecks(prev => ({ ...prev, camera: { status: 'checking', message: 'Requesting access...' } }));
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { width: 640, height: 480 }, 
@@ -54,316 +55,183 @@ const StudentVerify = () => {
       }
 
       streamRef.current = stream;
-
-      // Initialize AI detector
       await aiDetector.initialize();
 
-      setChecks(prev => ({
-        ...prev,
-        camera: { status: 'success', message: 'Camera access granted' }
-      }));
+      setChecks(prev => ({ ...prev, camera: { status: 'success', message: 'Camera connected' } }));
+      setProgress(25);
 
-      // Step 2: Lighting Check
-      setTimeout(async () => {
-        setCurrentStep(2);
-        setChecks(prev => ({
-          ...prev,
-          lighting: { status: 'checking', message: 'Analyzing lighting conditions...' }
-        }));
+      // Step 2: Microphone
+      setTimeout(() => {
+        setChecks(prev => ({ ...prev, microphone: { status: 'checking', message: 'Testing microphone...' } }));
+        
+        setTimeout(() => {
+          setChecks(prev => ({ ...prev, microphone: { status: 'success', message: 'Microphone working' } }));
+          setProgress(50);
 
-        if (!videoRef.current) return;
-
-        const lightingResult = await aiDetector.checkLighting(videoRef.current);
-        console.log('Lighting:', lightingResult);
-
-        if (!lightingResult.isGood) {
-          setChecks(prev => ({
-            ...prev,
-            lighting: { status: 'error', message: `Poor lighting (brightness: ${Math.round(lightingResult.brightness)})` }
-          }));
-          toast.error("Please improve lighting conditions");
-          setVerifying(false);
-          return;
-        }
-
-        setChecks(prev => ({
-          ...prev,
-          lighting: { status: 'success', message: 'Good lighting detected' }
-        }));
-
-        // Step 3: Face Detection
-        setTimeout(async () => {
-          setCurrentStep(3);
-          setChecks(prev => ({
-            ...prev,
-            face: { status: 'checking', message: 'Detecting face...' }
-          }));
-
-          if (!videoRef.current) return;
-
-          const faceCount = await aiDetector.detectFaces(videoRef.current);
-          console.log('Faces detected:', faceCount);
-
-          if (faceCount === 0) {
-            setChecks(prev => ({
-              ...prev,
-              face: { status: 'error', message: 'No face detected' }
-            }));
-            toast.error("Please position yourself in front of camera");
-            setVerifying(false);
-            return;
-          } else if (faceCount > 1) {
-            setChecks(prev => ({
-              ...prev,
-              face: { status: 'error', message: 'Multiple faces detected' }
-            }));
-            toast.error("Only one person allowed");
-            setVerifying(false);
-            return;
-          }
-
-          setChecks(prev => ({
-            ...prev,
-            face: { status: 'success', message: 'Single person detected' }
-          }));
-
-          // Step 4: Audio Check
+          // Step 3: Lighting
           setTimeout(async () => {
-            setCurrentStep(4);
-            setChecks(prev => ({
-              ...prev,
-              audio: { status: 'checking', message: 'Testing microphone...' }
-            }));
+            setChecks(prev => ({ ...prev, lighting: { status: 'checking', message: 'Analyzing lighting...' } }));
 
-            if (!streamRef.current) return;
+            if (!videoRef.current) return;
+            const lightingResult = await aiDetector.checkLighting(videoRef.current);
 
-            const audioLevel = await aiDetector.analyzeAudioLevel(streamRef.current);
-            console.log('Audio level:', audioLevel);
+            if (!lightingResult.isGood) {
+              setChecks(prev => ({ ...prev, lighting: { status: 'error', message: 'Poor lighting detected' } }));
+              toast.error("Please improve lighting conditions");
+              return;
+            }
 
-            setChecks(prev => ({
-              ...prev,
-              audio: { status: 'success', message: 'Microphone working' }
-            }));
+            setChecks(prev => ({ ...prev, lighting: { status: 'success', message: 'Good lighting' } }));
+            setProgress(75);
 
-            // All checks complete
-            toast.success("Environment verification complete!");
-            setTimeout(() => {
-              navigate('/student/exam');
-            }, 1500);
-          }, 1500);
-        }, 2000);
+            // Step 4: Face Detection
+            setTimeout(async () => {
+              setChecks(prev => ({ ...prev, face: { status: 'checking', message: 'Detecting face...' } }));
+
+              if (!videoRef.current) return;
+              const faceCount = await aiDetector.detectFaces(videoRef.current);
+
+              if (faceCount === 0) {
+                setChecks(prev => ({ ...prev, face: { status: 'error', message: 'No face detected' } }));
+                toast.error("Please position yourself in front of camera");
+                return;
+              } else if (faceCount > 1) {
+                setChecks(prev => ({ ...prev, face: { status: 'error', message: 'Multiple faces detected' } }));
+                toast.error("Only one person allowed");
+                return;
+              }
+
+              setChecks(prev => ({ ...prev, face: { status: 'success', message: 'Face verified' } }));
+              setProgress(100);
+
+              toast.success("Verification complete!");
+              setTimeout(() => {
+                navigate('/student/exam');
+              }, 1500);
+            }, 1000);
+          }, 1000);
+        }, 1000);
       }, 1000);
 
     } catch (error) {
       console.error('Camera access error:', error);
-      setChecks(prev => ({
-        ...prev,
-        camera: { status: 'error', message: 'Camera access denied' }
-      }));
+      setChecks(prev => ({ ...prev, camera: { status: 'error', message: 'Access denied' } }));
       toast.error("Please allow camera and microphone access");
-      setVerifying(false);
     }
   };
 
-  const getStatusIcon = (status: string) => {
-    if (status === 'success') return <CheckCircle2 className="w-5 h-5 text-success" />;
-    if (status === 'error') return <AlertCircle className="w-5 h-5 text-destructive" />;
-    if (status === 'checking') return <Loader2 className="w-5 h-5 text-primary animate-spin" />;
-    return <div className="w-5 h-5 rounded-full border-2 border-muted" />;
-  };
-
-  const getStatusColor = (status: string) => {
-    if (status === 'success') return 'border-success bg-success/5';
-    if (status === 'error') return 'border-destructive bg-destructive/5';
-    if (status === 'checking') return 'border-primary bg-primary/5';
-    return 'border-border';
+  const getStatusIcon = (status: string, Icon: any) => {
+    const baseClass = "w-5 h-5";
+    if (status === 'success') return <Icon className={`${baseClass} text-primary`} />;
+    if (status === 'error') return <Icon className={`${baseClass} text-destructive`} />;
+    if (status === 'checking') return <Icon className={`${baseClass} text-primary animate-pulse`} />;
+    return <Icon className={`${baseClass} text-muted-foreground`} />;
   };
 
   if (!studentData) return null;
 
-  const progress = (currentStep / 4) * 100;
-
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-2xl">
-        {/* Header */}
-        <div className="mb-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-primary flex items-center justify-center">
-              <Shield className="w-7 h-7 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="text-lg font-bold">ExamEye Shield</h1>
-              <p className="text-sm text-muted-foreground">Student Dashboard</p>
-            </div>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-muted-foreground">Subject Code</p>
-            <p className="text-sm font-mono font-semibold">{studentData.subjectCode}</p>
-          </div>
+    <div className="min-h-screen bg-background p-4">
+      <div className="container mx-auto max-w-6xl py-8">
+        <div className="grid md:grid-cols-2 gap-6">
+          {/* Camera Preview */}
+          <Card>
+            <CardContent className="p-6">
+              <h2 className="text-xl font-bold mb-4">Camera Preview</h2>
+              <div className="aspect-video bg-muted rounded-lg overflow-hidden flex items-center justify-center">
+                {verificationStarted ? (
+                  <video 
+                    ref={videoRef} 
+                    autoPlay 
+                    muted 
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <Camera className="w-16 h-16 text-muted-foreground" />
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Verification Progress */}
+          <Card>
+            <CardContent className="p-6">
+              <h2 className="text-xl font-bold mb-4">Verification Progress</h2>
+              
+              <Progress value={progress} className="mb-6 h-3" />
+
+              <div className="space-y-4 mb-6">
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(checks.camera.status, Camera)}
+                  <div className="flex-1">
+                    <p className="font-semibold">Camera Access</p>
+                    <p className="text-sm text-muted-foreground">{checks.camera.message}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(checks.microphone.status, Mic)}
+                  <div className="flex-1">
+                    <p className="font-semibold">Microphone Access</p>
+                    <p className="text-sm text-muted-foreground">{checks.microphone.message}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(checks.lighting.status, Sun)}
+                  <div className="flex-1">
+                    <p className="font-semibold">Lighting Conditions</p>
+                    <p className="text-sm text-muted-foreground">{checks.lighting.message}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(checks.face.status, User)}
+                  <div className="flex-1">
+                    <p className="font-semibold">Face Detection</p>
+                    <p className="text-sm text-muted-foreground">{checks.face.message}</p>
+                  </div>
+                </div>
+              </div>
+
+              {!verificationStarted && (
+                <Button 
+                  onClick={startVerification} 
+                  className="w-full"
+                  size="lg"
+                >
+                  Start Verification
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+              )}
+            </CardContent>
+          </Card>
         </div>
 
-        {!verifying ? (
-          <>
-            {/* Welcome Card */}
-            <Card className="mb-6">
-              <CardContent className="p-8">
-                <h2 className="text-2xl font-bold mb-2">Welcome to Your Exam</h2>
-                <p className="text-muted-foreground mb-6">
-                  Before we begin, we need to verify your environment
-                </p>
-              </CardContent>
-            </Card>
-
-            {/* Environment Checks */}
-            <div className="grid md:grid-cols-2 gap-6 mb-6">
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                      <Camera className="w-6 h-6 text-primary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">Camera Check</h3>
-                      <p className="text-sm text-muted-foreground">Verify webcam access</p>
-                    </div>
-                  </div>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      Good lighting required
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      Face must be visible
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      Only one person allowed
-                    </li>
-                  </ul>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardContent className="p-6">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-12 h-12 rounded-full bg-secondary/10 flex items-center justify-center">
-                      <Mic className="w-6 h-6 text-secondary" />
-                    </div>
-                    <div>
-                      <h3 className="font-semibold">Audio Check</h3>
-                      <p className="text-sm text-muted-foreground">Verify microphone access</p>
-                    </div>
-                  </div>
-                  <ul className="space-y-2 text-sm text-muted-foreground">
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      Quiet environment needed
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      No background voices
-                    </li>
-                    <li className="flex items-center gap-2">
-                      <div className="w-1.5 h-1.5 rounded-full bg-success"></div>
-                      Microphone must work
-                    </li>
-                  </ul>
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Important Rules */}
-            <Card className="mb-6 border-warning bg-warning/5">
-              <CardContent className="p-6">
-                <div className="flex items-start gap-3 mb-4">
-                  <AlertCircle className="w-5 h-5 text-warning mt-0.5" />
-                  <h3 className="font-semibold">Important Rules</h3>
-                </div>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-start gap-2">
-                    <span className="text-warning mt-1">▸</span>
-                    Looking away from screen more than 3 times will trigger a violation
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-warning mt-1">▸</span>
-                    Switching tabs or copying text will be flagged
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-warning mt-1">▸</span>
-                    Mobile phones or devices in view will be detected
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-warning mt-1">▸</span>
-                    Multiple faces in frame will trigger an alert
-                  </li>
-                </ul>
-              </CardContent>
-            </Card>
-
-            {/* Action Buttons */}
-            <div className="flex gap-4">
-              <Button variant="outline" onClick={() => navigate('/')} className="flex-1">
-                Go Back
-              </Button>
-              <Button onClick={startVerification} className="flex-1" size="lg">
-                Start Environment Check
-              </Button>
-            </div>
-          </>
-        ) : (
-          <>
-            {/* Verification in Progress */}
-            <Card>
-              <CardContent className="p-8">
-                <h2 className="text-2xl font-bold mb-2">Environment Verification</h2>
-                <p className="text-sm text-muted-foreground mb-6">
-                  We need to verify your exam environment before starting
-                </p>
-
-                <Progress value={progress} className="mb-8" />
-
-                <div className="space-y-4">
-                  <div className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-colors ${getStatusColor(checks.camera.status)}`}>
-                    {getStatusIcon(checks.camera.status)}
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Camera Access</h3>
-                      <p className="text-sm text-muted-foreground">{checks.camera.message}</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-colors ${getStatusColor(checks.lighting.status)}`}>
-                    {getStatusIcon(checks.lighting.status)}
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Lighting Check</h3>
-                      <p className="text-sm text-muted-foreground">{checks.lighting.message}</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-colors ${getStatusColor(checks.face.status)}`}>
-                    {getStatusIcon(checks.face.status)}
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Face Detection</h3>
-                      <p className="text-sm text-muted-foreground">{checks.face.message}</p>
-                    </div>
-                  </div>
-
-                  <div className={`flex items-center gap-4 p-4 rounded-lg border-2 transition-colors ${getStatusColor(checks.audio.status)}`}>
-                    {getStatusIcon(checks.audio.status)}
-                    <div className="flex-1">
-                      <h3 className="font-semibold">Audio Check</h3>
-                      <p className="text-sm text-muted-foreground">{checks.audio.message}</p>
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Hidden video element for camera stream */}
-            <video ref={videoRef} autoPlay muted className="hidden" />
-          </>
-        )}
+        {/* Before you start */}
+        <Card className="mt-6">
+          <CardContent className="p-6">
+            <h3 className="font-bold mb-4">Before you start:</h3>
+            <ul className="space-y-2">
+              <li className="flex items-center gap-2 text-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                Ensure you're in a well-lit room
+              </li>
+              <li className="flex items-center gap-2 text-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                Position yourself at the center of the camera
+              </li>
+              <li className="flex items-center gap-2 text-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                No other person should be visible
+              </li>
+              <li className="flex items-center gap-2 text-sm">
+                <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                Remove any background noise
+              </li>
+            </ul>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

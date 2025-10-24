@@ -14,6 +14,7 @@ export class AIProctorDetector {
   private cocoModel: cocoSsd.ObjectDetection | null = null;
   private faceDetection: FaceDetection | null = null;
   private isInitialized = false;
+  private confidenceThreshold = 0.6; // Minimum confidence for detection
   private violationThreshold = {
     lookingAway: 3,
     audioNoise: 3,
@@ -58,8 +59,11 @@ export class AIProctorDetector {
     const predictions = await this.cocoModel.detect(videoElement);
     const violations: DetectionResult[] = [];
 
+    // Filter predictions by confidence threshold
+    const confidePredictions = predictions.filter(p => p.score >= this.confidenceThreshold);
+
     // Count persons
-    const persons = predictions.filter(p => p.class === 'person');
+    const persons = confidePredictions.filter(p => p.class === 'person');
     
     if (persons.length === 0) {
       violations.push({
@@ -76,9 +80,11 @@ export class AIProctorDetector {
       });
     }
 
-    // Detect phones
-    const phones = predictions.filter(p => 
-      p.class === 'cell phone' || p.class === 'phone'
+    // Detect phones - more aggressive detection
+    const phones = confidePredictions.filter(p => 
+      p.class === 'cell phone' || 
+      p.class === 'phone' ||
+      p.class === 'remote'
     );
     if (phones.length > 0) {
       violations.push({
@@ -89,9 +95,9 @@ export class AIProctorDetector {
       });
     }
 
-    // Detect suspicious objects (laptop, tablet, book)
-    const suspiciousObjects = predictions.filter(p => 
-      ['laptop', 'tablet', 'book', 'monitor', 'keyboard'].includes(p.class)
+    // Detect suspicious objects
+    const suspiciousObjects = confidePredictions.filter(p => 
+      ['laptop', 'tablet', 'book', 'monitor', 'keyboard', 'mouse'].includes(p.class)
     );
     if (suspiciousObjects.length > 0) {
       violations.push({

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Clock, VideoOff, Video, Save, AlertTriangle } from "lucide-react";
+import { Shield, Clock, AlertTriangle, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,11 +13,11 @@ import { violationLogger } from "@/utils/violationLogger";
 const StudentExam = () => {
   const navigate = useNavigate();
   const [studentData, setStudentData] = useState<any>(null);
-  const [cameraActive, setCameraActive] = useState(false);
-  const [timeRemaining, setTimeRemaining] = useState(3600); // 60 minutes in seconds
+  const [timeRemaining, setTimeRemaining] = useState(3600);
   const [answers, setAnswers] = useState<{ [key: number]: string }>({});
   const [examId, setExamId] = useState<string | null>(null);
   const [violationCount, setViolationCount] = useState(0);
+  const [recentWarnings, setRecentWarnings] = useState<string[]>([]);
   const [questions, setQuestions] = useState<any[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -33,16 +33,10 @@ const StudentExam = () => {
     const parsedData = JSON.parse(data);
     setStudentData(parsedData);
 
-    // Get exam ID and start exam
     startExam(parsedData);
-    
-    // Load exam questions
     loadExamQuestions();
-
-    // Start camera and AI monitoring
     initializeMonitoring();
 
-    // Timer countdown
     const timer = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
@@ -54,18 +48,18 @@ const StudentExam = () => {
       });
     }, 1000);
 
-    // Track tab visibility for violation detection
     const handleVisibilityChange = () => {
       if (document.hidden && examId && studentData) {
-        recordViolation('tab_switch', 'Student switched tabs');
+        recordViolation('tab_switch', 'Tab switched');
+        setRecentWarnings(prev => ['Tab switching detected', ...prev].slice(0, 3));
       }
     };
 
-    // Prevent copy/paste
     const handleCopyPaste = (e: Event) => {
       e.preventDefault();
       if (examId && studentData) {
         recordViolation('copy_paste', 'Copy/paste attempted');
+        setRecentWarnings(prev => ['Copy/paste detected', ...prev].slice(0, 3));
       }
     };
 
@@ -100,27 +94,19 @@ const StudentExam = () => {
       }
       
       streamRef.current = stream;
-      setCameraActive(true);
-
-      // Initialize AI detector
       await aiDetector.initialize();
-      console.log('AI monitoring initialized');
-
-      // Start AI detection loop
       startAIMonitoring();
     } catch (error) {
       console.error('Camera error:', error);
-      toast.error("Camera access required for exam");
+      toast.error("Camera access required");
     }
   };
 
   const startAIMonitoring = () => {
-    // Run detection every 3 seconds
     detectionIntervalRef.current = setInterval(async () => {
       if (!videoRef.current || !streamRef.current || !examId || !studentData) return;
 
       try {
-        // Object detection
         const violations = await aiDetector.detectObjects(videoRef.current);
         
         for (const violation of violations) {
@@ -135,13 +121,12 @@ const StudentExam = () => {
           );
 
           setViolationCount(prev => prev + 1);
+          const message = violation.type.replace(/_/g, ' ');
+          setRecentWarnings(prev => [message, ...prev].slice(0, 3));
           
-          toast.error(`Violation: ${violation.type.replace('_', ' ')}`, {
-            description: 'This incident has been reported to the admin'
-          });
+          toast.error(`Violation: ${message}`);
         }
 
-        // Audio check
         const audioLevel = await aiDetector.analyzeAudioLevel(streamRef.current);
         if (audioLevel.isNoisy) {
           const shouldLog = aiDetector.incrementViolation('audioNoise');
@@ -155,19 +140,18 @@ const StudentExam = () => {
               snapshot
             );
             setViolationCount(prev => prev + 1);
+            setRecentWarnings(prev => ['Suspicious audio', ...prev].slice(0, 3));
             aiDetector.resetViolation('audioNoise');
-            toast.warning('Suspicious audio detected');
           }
         }
       } catch (error) {
         console.error('AI monitoring error:', error);
       }
-    }, 3000);
+    }, 2000);
   };
 
   const loadExamQuestions = async () => {
     try {
-      // Load questions from the first available template (or implement template selection)
       const { data: questionsData, error } = await supabase
         .from('exam_questions')
         .select('*')
@@ -178,11 +162,10 @@ const StudentExam = () => {
       if (questionsData && questionsData.length > 0) {
         setQuestions(questionsData);
       } else {
-        // Fallback to default questions if no template exists
         setQuestions([
-          { id: 1, question_number: 1, question_text: "What is the capital of France?", question_type: "short_answer" },
-          { id: 2, question_number: 2, question_text: "Explain the concept of object-oriented programming.", question_type: "short_answer" },
-          { id: 3, question_number: 3, question_text: "What are the three main types of machine learning?", question_type: "short_answer" },
+          { id: 1, question_number: 1, question_text: "Explain the concept of artificial intelligence and its applications in modern proctoring systems.", question_type: "short_answer" },
+          { id: 2, question_number: 2, question_text: "Describe how computer vision techniques can be used for real-time monitoring.", question_type: "short_answer" },
+          { id: 3, question_number: 3, question_text: "What are the ethical considerations in AI-powered proctoring systems?", question_type: "short_answer" },
         ]);
       }
     } catch (error) {
@@ -202,7 +185,6 @@ const StudentExam = () => {
 
       setExamId(exams.id);
 
-      // Update exam status to in_progress
       await supabase
         .from('exams')
         .update({ 
@@ -249,7 +231,7 @@ const StudentExam = () => {
     }
   };
 
-  const handleSaveDraft = async () => {
+  const handleSubmit = async () => {
     if (!examId) return;
 
     try {
@@ -265,21 +247,7 @@ const StudentExam = () => {
       );
 
       await Promise.all(promises);
-      toast.success("Draft saved successfully");
-    } catch (error) {
-      console.error('Error saving draft:', error);
-      toast.error("Failed to save draft");
-    }
-  };
 
-  const handleSubmit = async () => {
-    if (!examId) return;
-
-    try {
-      // Save all answers
-      await handleSaveDraft();
-
-      // Update exam status
       await supabase
         .from('exams')
         .update({ 
@@ -288,144 +256,95 @@ const StudentExam = () => {
         })
         .eq('id', examId);
 
-      toast.success("Exam submitted successfully!");
+      toast.success("Exam submitted!");
       
-      // Stop camera
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
 
-      setTimeout(() => {
-        navigate('/');
-      }, 2000);
+      setTimeout(() => navigate('/'), 2000);
     } catch (error) {
-      console.error('Error submitting exam:', error);
-      toast.error("Failed to submit exam");
+      console.error('Error submitting:', error);
+      toast.error("Failed to submit");
     }
   };
 
   const formatTime = (seconds: number) => {
-    const hours = Math.floor(seconds / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
+    const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (!studentData) return null;
 
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="border-b sticky top-0 bg-background z-10">
+      <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
               <Shield className="w-6 h-6 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="font-bold">ExamEye Shield</h1>
-              <p className="text-xs text-muted-foreground">Exam in Progress</p>
+              <h1 className="font-bold">Proctored Exam</h1>
+              <p className="text-xs text-muted-foreground">{studentData.name} ({studentData.studentId})</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <AlertTriangle className="w-4 h-4 text-warning" />
-              <span className="text-sm font-semibold">Violations: {violationCount}</span>
+              <Clock className="w-4 h-4" />
+              <span className="text-lg font-mono font-bold">{formatTime(timeRemaining)}</span>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-muted-foreground">Subject Code</p>
-              <p className="text-sm font-mono font-semibold">{studentData.subjectCode}</p>
-            </div>
+            <Button variant="destructive" size="sm" onClick={handleSubmit}>
+              <LogOut className="w-4 h-4 mr-2" />
+              End Exam
+            </Button>
           </div>
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-6">
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Main Content */}
           <div className="lg:col-span-2">
             <Card>
-              <CardContent className="p-8">
-                <h2 className="text-2xl font-bold mb-6">Exam Questions</h2>
+              <CardContent className="p-6">
+                <h2 className="text-2xl font-bold mb-6">Examination Paper</h2>
                 
                 <div className="space-y-8">
                   {questions.map((question, index) => (
                     <div key={question.id} className="space-y-3">
-                      <div>
-                        <h3 className="font-semibold mb-1">Question {index + 1}</h3>
-                        <p className="text-muted-foreground">{question.question_text || question.text}</p>
-                      </div>
+                      <h3 className="font-semibold">Question {index + 1}:</h3>
+                      <p className="text-muted-foreground">{question.question_text}</p>
                       
-                      {question.question_type === 'mcq' && question.options ? (
-                        <div className="space-y-2">
-                          {Object.entries(question.options).map(([key, value]) => (
-                            <label key={key} className="flex items-center gap-2 p-3 border rounded-lg cursor-pointer hover:bg-muted/50">
-                              <input
-                                type="radio"
-                                name={`question-${question.id}`}
-                                value={key}
-                                checked={answers[question.id] === key}
-                                onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
-                                className="w-4 h-4"
-                              />
-                              <span className="text-sm">{key.toUpperCase()}. {value as string}</span>
-                            </label>
-                          ))}
-                        </div>
-                      ) : (
-                        <Textarea
-                          placeholder="Type your answer here..."
-                          value={answers[question.id] || ''}
-                          onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
-                          rows={6}
-                          className="resize-none"
-                        />
-                      )}
+                      <Textarea
+                        placeholder="Type your answer here..."
+                        value={answers[question.id] || ''}
+                        onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
+                        rows={6}
+                        className="resize-none"
+                      />
                     </div>
                   ))}
-                </div>
-
-                <div className="flex gap-4 mt-8">
-                  <Button variant="outline" onClick={handleSaveDraft} className="flex-1">
-                    <Save className="w-4 h-4 mr-2" />
-                    Save Draft
-                  </Button>
-                  <Button onClick={handleSubmit} className="flex-1">
-                    Submit Exam
-                  </Button>
                 </div>
               </CardContent>
             </Card>
           </div>
 
           {/* Sidebar */}
-          <div className="space-y-6">
-            {/* Timer */}
+          <div className="space-y-4">
+            {/* Live Monitoring */}
             <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  <Clock className="w-5 h-5 text-primary" />
-                  <h3 className="font-semibold">Time Remaining</h3>
-                </div>
-                <div className="text-3xl font-bold font-mono text-center">
-                  {formatTime(timeRemaining)}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Camera Status */}
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center gap-3 mb-4">
-                  {cameraActive ? (
-                    <Video className="w-5 h-5 text-success" />
-                  ) : (
-                    <VideoOff className="w-5 h-5 text-destructive" />
-                  )}
-                  <h3 className="font-semibold">Camera Status</h3>
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+                    <h3 className="font-semibold">Live Monitoring</h3>
+                  </div>
+                  <Badge variant="destructive" className="text-xs">LIVE</Badge>
                 </div>
                 
-                <div className="aspect-video bg-muted rounded-lg overflow-hidden mb-3">
+                <div className="aspect-video bg-muted rounded-lg overflow-hidden">
                   <video 
                     ref={videoRef} 
                     autoPlay 
@@ -433,17 +352,43 @@ const StudentExam = () => {
                     className="w-full h-full object-cover"
                   />
                 </div>
+              </CardContent>
+            </Card>
 
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">
-                    {cameraActive ? "AI Monitoring Active" : "Camera Inactive"}
-                  </span>
-                  {cameraActive && (
-                    <Badge variant="outline" className="text-xs">
-                      Live
-                    </Badge>
-                  )}
+            {/* Active Alerts */}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2 mb-3">
+                  <AlertTriangle className="w-4 h-4 text-warning" />
+                  <h3 className="font-semibold">Active Alerts</h3>
                 </div>
+                <p className="text-sm text-muted-foreground">
+                  {recentWarnings.length > 0 ? recentWarnings[0] : 'No violations detected'}
+                </p>
+              </CardContent>
+            </Card>
+
+            {/* Total Violations */}
+            <Card>
+              <CardContent className="p-4 text-center">
+                <p className="text-6xl font-bold text-destructive">{violationCount}</p>
+                <p className="text-sm text-muted-foreground mt-2">Total Violations</p>
+              </CardContent>
+            </Card>
+
+            {/* Recent Warnings */}
+            <Card>
+              <CardContent className="p-4">
+                <h3 className="font-semibold mb-3">Recent Warnings</h3>
+                {recentWarnings.length > 0 ? (
+                  <div className="space-y-2">
+                    {recentWarnings.map((warning, index) => (
+                      <p key={index} className="text-sm text-muted-foreground capitalize">{warning}</p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No warnings yet</p>
+                )}
               </CardContent>
             </Card>
           </div>

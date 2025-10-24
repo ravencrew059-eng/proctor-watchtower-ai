@@ -1,23 +1,29 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Activity, Users, AlertTriangle, LogOut, FileText, Download, Upload } from "lucide-react";
+import { Shield, Activity, Users, AlertTriangle, LogOut, Upload, RefreshCw, Download, FileText, Eye } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import ViolationChart from "@/components/ViolationChart";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { pdfGenerator } from "@/utils/pdfGenerator";
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const [examSessions, setExamSessions] = useState<any[]>([]);
   const [violations, setViolations] = useState<any[]>([]);
   const [stats, setStats] = useState({
-    activeExams: 0,
-    totalStudents: 0,
+    totalSessions: 0,
+    activeNow: 0,
+    completed: 0,
     totalViolations: 0,
+    avgViolationsPerStudent: 0,
+    avgExamDuration: 0,
+    totalStudents: 0,
   });
+  const [chartData, setChartData] = useState<any[]>([]);
+  const [studentsWithViolations, setStudentsWithViolations] = useState<any[]>([]);
 
   useEffect(() => {
     const isAuthenticated = sessionStorage.getItem('adminAuth');
