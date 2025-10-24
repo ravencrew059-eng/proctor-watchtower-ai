@@ -35,20 +35,18 @@ const AdminDashboard = () => {
 
     loadDashboardData();
 
-    // Subscribe to real-time violations
     const violationSubscription = supabase
       .channel('violations-channel')
       .on('postgres_changes', 
         { event: 'INSERT', schema: 'public', table: 'violations' },
         (payload) => {
-          console.log('New violation detected:', payload);
+          console.log('New violation:', payload);
           toast.error('New violation detected!');
           loadDashboardData();
         }
       )
       .subscribe();
 
-    // Poll for updates every 10 seconds
     const interval = setInterval(loadDashboardData, 10000);
 
     return () => {
@@ -59,75 +57,156 @@ const AdminDashboard = () => {
 
   const loadDashboardData = async () => {
     try {
-      // Load exams with student details
       const { data: examsData, error: examsError } = await supabase
         .from('exams')
         .select(`
           *,
           students (
             name,
-            email
+            email,
+            student_id
           )
         `)
         .order('started_at', { ascending: false });
 
       if (examsError) throw examsError;
 
-      // Load violations count for each exam
-      const examsWithViolations = await Promise.all(
-        (examsData || []).map(async (exam) => {
-          const { count } = await supabase
-            .from('violations')
-            .select('*', { count: 'exact', head: true })
-            .eq('exam_id', exam.id);
-
-          return {
-            ...exam,
-            violationCount: count || 0,
-          };
-        })
-      );
-
-      setExamSessions(examsWithViolations);
-
-      // Calculate stats
-      const activeCount = examsWithViolations.filter(e => e.status === 'in_progress').length;
-      const totalViolations = examsWithViolations.reduce((sum, e) => sum + e.violationCount, 0);
-
-      setStats({
-        activeExams: activeCount,
-        totalStudents: examsWithViolations.length,
-        totalViolations: totalViolations,
-      });
-
-      // Load all violations
       const { data: violationsData } = await supabase
         .from('violations')
         .select('*')
-        .order('timestamp', { ascending: false })
-        .limit(50);
+        .order('timestamp', { ascending: false });
 
       setViolations(violationsData || []);
+
+      // Calculate stats
+      const activeCount = (examsData || []).filter(e => e.status === 'in_progress').length;
+      const completedCount = (examsData || []).filter(e => e.status === 'completed').length;
+      const totalViolations = violationsData?.length || 0;
+      const totalStudents = new Set((examsData || []).map(e => e.student_id)).size;
+      
+      const avgViolations = totalStudents > 0 ? (totalViolations / totalStudents).toFixed(1) : 0;
+      
+      const completedExams = (examsData || []).filter(e => e.status === 'completed' && e.started_at && e.completed_at);
+      const avgDuration = completedExams.length > 0
+        ? Math.round(completedExams.reduce((sum, e) => {
+            const start = new Date(e.started_at).getTime();
+            const end = new Date(e.completed_at).getTime();
+            return sum + (end - start) / 1000 / 60;
+          }, 0) / completedExams.length)
+        : 0;
+
+      setStats({
+        totalSessions: examsData?.length || 0,
+        activeNow: activeCount,
+        completed: completedCount,
+        totalViolations,
+        avgViolationsPerStudent: Number(avgViolations),
+        avgExamDuration: avgDuration,
+        totalStudents,
+      });
+
+      setExamSessions(examsData || []);
+      prepareChartData(violationsData || []);
+      groupViolationsByStudent(examsData || [], violationsData || []);
 
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     }
   };
 
+  const prepareChartData = (violations: any[]) => {
+    const hourlyData: { [key: string]: number } = {};
+    
+    violations.forEach(v => {
+      const time = new Date(v.timestamp);
+      const hourKey = time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+      hourlyData[hourKey] = (hourlyData[hourKey] || 0) + 1;
+    });
+
+    const data = Object.entries(hourlyData)
+      .map(([time, count]) => ({ time, violations: count }))
+      .slice(-10);
+
+    setChartData(data);
+  };
+
+  const groupViolationsByStudent = (exams: any[], violations: any[]) => {
+    const studentMap: { [key: string]: any } = {};
+
+    exams.forEach(exam => {
+      if (!exam.student_id || !exam.students) return;
+      
+      const studentViolations = violations.filter(v => v.student_id === exam.student_id);
+      
+      if (studentViolations.length > 0) {
+        const violationTypes = [...new Set(studentViolations.map(v => v.violation_type))];
+        
+        studentMap[exam.student_id] = {
+          name: exam.students.name,
+          studentId: exam.students.student_id,
+          id: exam.student_id,
+          violationCount: studentViolations.length,
+          violationTypes,
+          violations: studentViolations,
+        };
+      }
+    });
+
+    setStudentsWithViolations(Object.values(studentMap));
+  };
+
   const handleLogout = () => {
     sessionStorage.removeItem('adminAuth');
-    toast.success("Logged out successfully");
+    toast.success("Logged out");
     navigate('/');
   };
 
-  const getStatusBadge = (status: string) => {
-    if (status === 'in_progress') {
-      return <Badge className="bg-primary">In Progress</Badge>;
+  const handleExportCSV = async (student: any) => {
+    try {
+      const csvContent = await pdfGenerator.exportToCSV(student.violations);
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${student.name}_violations.csv`;
+      a.click();
+      toast.success("CSV exported");
+    } catch (error) {
+      console.error('Error exporting CSV:', error);
+      toast.error("Failed to export CSV");
     }
-    if (status === 'completed') {
-      return <Badge variant="secondary">Completed</Badge>;
+  };
+
+  const handleGenerateReport = async (student: any) => {
+    try {
+      toast.info("Generating PDF report...");
+      const pdfUrl = await pdfGenerator.generateStudentReport(
+        student.name,
+        student.studentId,
+        student.violations
+      );
+      
+      window.open(pdfUrl, '_blank');
+      toast.success("Report generated and saved to Supabase");
+    } catch (error) {
+      console.error('Error generating report:', error);
+      toast.error("Failed to generate report");
     }
-    return <Badge variant="outline">Not Started</Badge>;
+  };
+
+  const handleExportAllCSV = async () => {
+    try {
+      const csvContent = await pdfGenerator.exportToCSV(violations);
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `all_violations_${Date.now()}.csv`;
+      a.click();
+      toast.success("CSV exported");
+    } catch (error) {
+      toast.error("Failed to export");
+    }
   };
 
   const formatDate = (dateString: string) => {
@@ -136,14 +215,8 @@ const AdminDashboard = () => {
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   };
 
-  const generatePDF = async (examId: string) => {
-    toast.info("PDF generation feature will be implemented with a PDF library");
-    // In production, implement PDF generation here
-  };
-
   return (
     <div className="min-h-screen bg-background">
-      {/* Header */}
       <header className="border-b bg-card">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -151,16 +224,24 @@ const AdminDashboard = () => {
               <Shield className="w-7 h-7 text-primary-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold">ExamEye Shield</h1>
-              <p className="text-sm text-muted-foreground">Admin Dashboard</p>
+              <h1 className="text-xl font-bold">Admin Dashboard</h1>
+              <p className="text-sm text-muted-foreground">Real-time Exam Monitoring</p>
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate('/admin/upload-template')}>
+            <Button variant="outline" size="sm" onClick={loadDashboardData}>
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExportAllCSV}>
+              <Download className="w-4 h-4 mr-2" />
+              Export CSV
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/admin/upload-template')}>
               <Upload className="w-4 h-4 mr-2" />
               Upload Template
             </Button>
-            <Button variant="outline" onClick={handleLogout}>
+            <Button variant="outline" size="sm" onClick={handleLogout}>
               <LogOut className="w-4 h-4 mr-2" />
               Logout
             </Button>
@@ -169,161 +250,245 @@ const AdminDashboard = () => {
       </header>
 
       <div className="container mx-auto px-4 py-8">
-        {/* Stats Cards */}
-        <div className="grid md:grid-cols-3 gap-6 mb-8">
+        {/* Stats Grid */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
           <Card>
             <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Activity className="w-6 h-6 text-primary" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Active Exams</p>
-                  <p className="text-3xl font-bold">{stats.activeExams}</p>
-                  <p className="text-xs text-muted-foreground">Currently in progress</p>
+                  <p className="text-sm text-muted-foreground">Total Sessions</p>
+                  <p className="text-3xl font-bold">{stats.totalSessions}</p>
                 </div>
+                <Activity className="w-8 h-8 text-primary" />
               </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center">
-                  <Users className="w-6 h-6 text-primary" />
-                </div>
+              <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-muted-foreground">Total Students</p>
-                  <p className="text-3xl font-bold">{stats.totalStudents}</p>
-                  <p className="text-xs text-muted-foreground">Registered students</p>
+                  <p className="text-sm text-muted-foreground">Active Now</p>
+                  <p className="text-3xl font-bold text-success">{stats.activeNow}</p>
                 </div>
+                <Users className="w-8 h-8 text-success" />
               </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardContent className="p-6">
-              <div className="flex items-center gap-4">
-                <div className="w-12 h-12 rounded-full bg-warning/10 flex items-center justify-center">
-                  <AlertTriangle className="w-6 h-6 text-warning" />
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-muted-foreground">Completed</p>
+                  <p className="text-3xl font-bold">{stats.completed}</p>
                 </div>
+                <Shield className="w-8 h-8 text-primary" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Violations</p>
-                  <p className="text-3xl font-bold">{stats.totalViolations}</p>
-                  <p className="text-xs text-muted-foreground">Across all exams</p>
+                  <p className="text-3xl font-bold text-destructive">{stats.totalViolations}</p>
                 </div>
+                <AlertTriangle className="w-8 h-8 text-destructive" />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div>
+                <p className="text-sm text-muted-foreground">Avg Violations/Student</p>
+                <p className="text-3xl font-bold text-warning">{stats.avgViolationsPerStudent}</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div>
+                <p className="text-sm text-muted-foreground">Avg Exam Duration</p>
+                <p className="text-3xl font-bold">{stats.avgExamDuration} min</p>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardContent className="p-6">
+              <div>
+                <p className="text-sm text-muted-foreground">Total Students</p>
+                <p className="text-3xl font-bold text-primary">{stats.totalStudents}</p>
               </div>
             </CardContent>
           </Card>
         </div>
 
-        {/* Tabs */}
-        <Tabs defaultValue="exams" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="exams">Exams</TabsTrigger>
-            <TabsTrigger value="violations">Violations</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          </TabsList>
+        {/* Violations Over Time Chart */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <h2 className="text-xl font-bold mb-6">Violations Over Time</h2>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="time" />
+                <YAxis />
+                <Tooltip />
+                <Line type="monotone" dataKey="violations" stroke="hsl(var(--destructive))" strokeWidth={2} dot={{ r: 4 }} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
 
-          <TabsContent value="exams">
+        {/* Recent Violation Evidence Gallery */}
+        <Card className="mb-8">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-2">
+                <Eye className="w-5 h-5" />
+                <h2 className="text-xl font-bold">Recent Violation Evidence Gallery</h2>
+                <Badge variant="secondary">{violations.filter(v => v.image_url).length} Images</Badge>
+              </div>
+            </div>
+            
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {violations
+                .filter(v => v.image_url)
+                .slice(0, 8)
+                .map((violation) => (
+                  <div key={violation.id} className="relative group">
+                    <div className="aspect-video rounded-lg overflow-hidden border-2 border-border hover:border-destructive transition-colors">
+                      <img 
+                        src={violation.image_url} 
+                        alt={violation.violation_type}
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          e.currentTarget.src = '/placeholder.svg';
+                        }}
+                      />
+                    </div>
+                    <div className="absolute top-2 left-2">
+                      <Badge variant="destructive" className="text-xs">
+                        {violation.violation_type.replace(/_/g, ' ')}
+                      </Badge>
+                    </div>
+                    <div className="mt-2">
+                      <p className="text-xs text-muted-foreground">
+                        {formatDate(violation.timestamp)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {violations.filter(v => v.image_url).length === 0 && (
+              <div className="text-center py-12 text-muted-foreground">
+                No violation evidence images found
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <div className="grid lg:grid-cols-3 gap-6">
+          {/* Students with Violations */}
+          <div className="lg:col-span-2">
             <Card>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h2 className="text-xl font-bold">Exam Sessions</h2>
-                    <p className="text-sm text-muted-foreground">Monitor all exam sessions and their status</p>
-                  </div>
-                  <Button variant="outline">
-                    <Download className="w-4 h-4 mr-2" />
-                    Export CSV
-                  </Button>
+                <div className="flex items-center gap-2 mb-6">
+                  <Users className="w-5 h-5" />
+                  <h2 className="text-xl font-bold">Students with Violations</h2>
+                  <Badge variant="destructive">{studentsWithViolations.length} Students</Badge>
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead>
-                      <tr className="border-b">
-                        <th className="text-left py-3 px-4 font-semibold">Student</th>
-                        <th className="text-left py-3 px-4 font-semibold">Subject Code</th>
-                        <th className="text-left py-3 px-4 font-semibold">Status</th>
-                        <th className="text-left py-3 px-4 font-semibold">Started</th>
-                        <th className="text-center py-3 px-4 font-semibold">Violations</th>
-                        <th className="text-center py-3 px-4 font-semibold">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {examSessions.map((session) => (
-                        <tr key={session.id} className="border-b hover:bg-muted/50">
-                          <td className="py-4 px-4">{session.students?.name || 'Unknown'}</td>
-                          <td className="py-4 px-4">
-                            <code className="text-xs bg-muted px-2 py-1 rounded">
-                              {session.subject_code}
-                            </code>
-                          </td>
-                          <td className="py-4 px-4">{getStatusBadge(session.status)}</td>
-                          <td className="py-4 px-4 text-sm text-muted-foreground">
-                            {formatDate(session.started_at)}
-                          </td>
-                          <td className="py-4 px-4 text-center">
-                            {session.violationCount > 0 ? (
-                              <Badge variant="destructive" className="rounded-full">
-                                {session.violationCount}
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="rounded-full">0</Badge>
-                            )}
-                          </td>
-                          <td className="py-4 px-4 text-center">
-                            <Button 
-                              size="sm" 
-                              variant="outline"
-                              onClick={() => generatePDF(session.id)}
-                            >
-                              <FileText className="w-4 h-4 mr-1" />
-                              PDF
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="space-y-4">
+                  {studentsWithViolations.map((student) => (
+                    <div key={student.id} className="border rounded-lg p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 className="font-bold">{student.name}</h3>
+                          <p className="text-sm text-muted-foreground">{student.studentId}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <AlertTriangle className="w-5 h-5 text-destructive" />
+                          <span className="font-bold text-destructive">{student.violationCount} Violations</span>
+                        </div>
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2 mb-3">
+                        {student.violationTypes.map((type: string) => (
+                          <Badge key={type} variant="secondary" className="text-xs">
+                            {type.replace(/_/g, ' ')}
+                          </Badge>
+                        ))}
+                      </div>
 
-                  {examSessions.length === 0 && (
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleExportCSV(student)}>
+                          <Download className="w-4 h-4 mr-1" />
+                          CSV
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleGenerateReport(student)}>
+                          <FileText className="w-4 h-4 mr-1" />
+                          Report
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+
+                  {studentsWithViolations.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground">
-                      No exam sessions found
+                      No students with violations
                     </div>
                   )}
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
 
-          <TabsContent value="violations">
-            <Card>
+            {/* Recent Violations List */}
+            <Card className="mt-6">
               <CardContent className="p-6">
-                <h2 className="text-xl font-bold mb-6">Violation Log</h2>
+                <h2 className="text-xl font-bold mb-6">Recent Violations</h2>
 
-                <div className="space-y-3">
-                  {violations.map((violation) => (
-                    <div key={violation.id} className="flex items-start gap-4 p-4 rounded-lg border">
-                      <div className="w-10 h-10 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                        <AlertTriangle className="w-5 h-5 text-destructive" />
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between mb-1">
-                          <h4 className="font-semibold capitalize">
-                            {violation.violation_type.replace('_', ' ')}
-                          </h4>
-                          <Badge variant={violation.severity === 'high' ? 'destructive' : 'outline'}>
-                            {violation.severity}
-                          </Badge>
+                <div className="space-y-4">
+                  {violations.slice(0, 5).map((violation) => (
+                    <div key={violation.id} className="border rounded-lg p-4">
+                      <div className="flex items-start gap-4">
+                        <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
+                          <AlertTriangle className="w-6 h-6 text-destructive" />
                         </div>
-                        <p className="text-sm text-muted-foreground mb-1">
-                          {violation.details?.message || 'No details'}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {formatDate(violation.timestamp)}
-                        </p>
+                        <div className="flex-1">
+                          <div className="flex items-center justify-between mb-2">
+                            <h4 className="font-semibold capitalize">
+                              {violation.violation_type.replace(/_/g, ' ')}
+                            </h4>
+                            <Badge variant={violation.severity === 'high' ? 'destructive' : 'secondary'}>
+                              {violation.severity}
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            {violation.details?.message || 'No details'}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {formatDate(violation.timestamp)}
+                          </p>
+                          
+                          {violation.image_url && (
+                            <div className="mt-3 aspect-video rounded-lg overflow-hidden border">
+                              <img 
+                                src={violation.image_url} 
+                                alt={violation.violation_type}
+                                className="w-full h-full object-cover"
+                                onError={(e) => {
+                                  e.currentTarget.src = '/placeholder.svg';
+                                }}
+                              />
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -336,51 +501,33 @@ const AdminDashboard = () => {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          </div>
 
-          <TabsContent value="analytics">
-            <ViolationChart violations={violations} />
-            
-            <Card className="mt-6">
+          {/* Live Alerts */}
+          <div>
+            <Card className="sticky top-4">
               <CardContent className="p-6">
-                <h2 className="text-xl font-bold mb-6">Violation Evidence Gallery</h2>
-                
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                  {violations
-                    .filter(v => v.image_url)
-                    .map((violation) => (
-                      <div key={violation.id} className="group relative">
-                        <div className="aspect-video rounded-lg overflow-hidden bg-muted border-2 border-border hover:border-primary transition-colors">
-                          <img 
-                            src={violation.image_url} 
-                            alt={violation.violation_type}
-                            className="w-full h-full object-cover"
-                            onError={(e) => {
-                              e.currentTarget.src = '/placeholder.svg';
-                            }}
-                          />
-                        </div>
-                        <div className="mt-2">
-                          <Badge variant={violation.severity === 'high' ? 'destructive' : 'secondary'} className="text-xs">
-                            {violation.violation_type.replace('_', ' ')}
-                          </Badge>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {formatDate(violation.timestamp)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                </div>
-
-                {violations.filter(v => v.image_url).length === 0 && (
-                  <div className="text-center py-12 text-muted-foreground">
-                    No violation evidence images found
+                <div className="flex items-center justify-between mb-6">
+                  <div className="flex items-center gap-2">
+                    <Activity className="w-5 h-5" />
+                    <h3 className="font-bold">Live Alerts</h3>
                   </div>
-                )}
+                  <Badge variant="destructive">LIVE</Badge>
+                </div>
+                
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Activity className="w-16 h-16 text-muted-foreground mb-4" />
+                  <p className="text-center text-muted-foreground">
+                    Monitoring for violations...
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Live alerts will appear here
+                  </p>
+                </div>
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </div>
     </div>
   );
