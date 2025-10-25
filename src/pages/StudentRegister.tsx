@@ -14,6 +14,7 @@ const StudentRegister = () => {
   const [formData, setFormData] = useState({
     name: "",
     email: "",
+    subjectCode: "",
   });
   const [faceCapture, setFaceCapture] = useState(false);
   const [faceCaptured, setFaceCaptured] = useState(false);
@@ -108,7 +109,7 @@ const StudentRegister = () => {
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.name.trim() || !formData.email.trim()) {
+    if (!formData.name.trim() || !formData.email.trim() || !formData.subjectCode.trim()) {
       toast.error("Please fill in all fields");
       return;
     }
@@ -121,12 +122,20 @@ const StudentRegister = () => {
     setLoading(true);
 
     try {
-      // Generate subject code
-      const { data: codeData, error: codeError } = await supabase.rpc('generate_subject_code');
-      
-      if (codeError) throw codeError;
-      
-      const subjectCode = codeData;
+      // Validate subject code exists
+      const { data: templateData, error: templateError } = await supabase
+        .from('exam_templates')
+        .select('id, subject_name, subject_code')
+        .eq('subject_code', formData.subjectCode.trim().toUpperCase())
+        .single();
+
+      if (templateError || !templateData) {
+        toast.error("Invalid subject code. Please check with your administrator.");
+        setLoading(false);
+        return;
+      }
+
+      const subjectCode = formData.subjectCode.trim().toUpperCase();
 
       // Insert student (without face_image_url first)
       const { data: studentData, error: studentError } = await supabase
@@ -156,12 +165,13 @@ const StudentRegister = () => {
         .insert({
           student_id: studentData.id,
           subject_code: subjectCode,
+          exam_template_id: templateData.id,
           status: 'not_started',
         });
 
       if (examError) throw examError;
 
-      toast.success(`Registration successful! Your Subject Code: ${subjectCode}`, {
+      toast.success(`Registration successful for ${templateData.subject_name}!`, {
         duration: 5000,
       });
 
@@ -170,6 +180,7 @@ const StudentRegister = () => {
         id: studentData.id,
         name: studentData.name,
         subjectCode: subjectCode,
+        subjectName: templateData.subject_name,
       }));
 
       setTimeout(() => {
@@ -241,6 +252,20 @@ const StudentRegister = () => {
                 />
               </div>
 
+              <div className="space-y-2">
+                <Label htmlFor="subjectCode">Subject Code</Label>
+                <Input
+                  id="subjectCode"
+                  placeholder="Enter subject code (e.g., ETCS214A)"
+                  value={formData.subjectCode}
+                  onChange={(e) => setFormData({ ...formData, subjectCode: e.target.value.toUpperCase() })}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">
+                  Enter the subject code provided by your administrator
+                </p>
+              </div>
+
               {/* Face Registration */}
               <div className="space-y-2">
                 <Label>Face Registration</Label>
@@ -302,7 +327,7 @@ const StudentRegister = () => {
               </Button>
 
               <p className="text-xs text-center text-muted-foreground">
-                Your subject code will be auto-generated and displayed after registration
+                Make sure you have the correct subject code before registering
               </p>
             </form>
           </CardContent>
@@ -315,7 +340,7 @@ const StudentRegister = () => {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>
-                You'll receive a unique exam code
+                Enter the subject code provided by your administrator
               </li>
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>

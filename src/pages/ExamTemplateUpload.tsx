@@ -5,15 +5,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import * as XLSX from 'xlsx';
+
+const DEFAULT_SUBJECTS = [
+  { code: "ETCS214A", name: "Data Structure" },
+  { code: "ETCS332B", name: "Engineering Mathematics" },
+  { code: "ETCS456A", name: "Operating System" },
+  { code: "ETCS75A", name: "Theory of Computation" },
+  { code: "ETCS852A", name: "Chemistry" },
+];
 
 const ExamTemplateUpload = () => {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(false);
   const [templateName, setTemplateName] = useState("");
   const [file, setFile] = useState<File | null>(null);
+  const [subjectType, setSubjectType] = useState<"existing" | "custom">("existing");
+  const [selectedSubject, setSelectedSubject] = useState<string>("");
+  const [customSubjectName, setCustomSubjectName] = useState("");
+  const [customSubjectCode, setCustomSubjectCode] = useState("");
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -61,6 +74,27 @@ const ExamTemplateUpload = () => {
       return;
     }
 
+    // Validate subject selection
+    let subjectCode = "";
+    let subjectName = "";
+    
+    if (subjectType === "existing") {
+      if (!selectedSubject) {
+        toast.error("Please select a subject");
+        return;
+      }
+      const subject = DEFAULT_SUBJECTS.find(s => s.code === selectedSubject);
+      subjectCode = subject!.code;
+      subjectName = subject!.name;
+    } else {
+      if (!customSubjectName.trim() || !customSubjectCode.trim()) {
+        toast.error("Please enter both subject name and code");
+        return;
+      }
+      subjectCode = customSubjectCode.trim().toUpperCase();
+      subjectName = customSubjectName.trim();
+    }
+
     setLoading(true);
 
     try {
@@ -73,13 +107,15 @@ const ExamTemplateUpload = () => {
         return;
       }
 
-      // Create exam template
+      // Create exam template with subject info
       const { data: templateData, error: templateError } = await supabase
         .from('exam_templates')
         .insert({
           template_name: templateName.trim(),
           total_questions: questions.length,
-          created_by: 'admin'
+          created_by: 'admin',
+          subject_code: subjectCode,
+          subject_name: subjectName
         })
         .select()
         .single();
@@ -112,7 +148,7 @@ const ExamTemplateUpload = () => {
 
       if (questionsError) throw questionsError;
 
-      toast.success(`Template "${templateName}" uploaded with ${questions.length} questions!`);
+      toast.success(`Template "${templateName}" uploaded with ${questions.length} questions for ${subjectName}!`);
       
       setTimeout(() => {
         navigate('/admin/dashboard');
@@ -167,6 +203,59 @@ const ExamTemplateUpload = () => {
                   onChange={(e) => setTemplateName(e.target.value)}
                   required
                 />
+              </div>
+
+              {/* Subject Selection */}
+              <div className="space-y-4">
+                <Label>Subject</Label>
+                <div className="flex gap-4 mb-4">
+                  <Button
+                    type="button"
+                    variant={subjectType === "existing" ? "default" : "outline"}
+                    onClick={() => setSubjectType("existing")}
+                    size="sm"
+                  >
+                    Select Existing
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={subjectType === "custom" ? "default" : "outline"}
+                    onClick={() => setSubjectType("custom")}
+                    size="sm"
+                  >
+                    Add Custom
+                  </Button>
+                </div>
+
+                {subjectType === "existing" ? (
+                  <Select value={selectedSubject} onValueChange={setSelectedSubject} required>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select a subject" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DEFAULT_SUBJECTS.map((subject) => (
+                        <SelectItem key={subject.code} value={subject.code}>
+                          {subject.name} - {subject.code}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="space-y-3">
+                    <Input
+                      placeholder="Subject Name (e.g., Database Management)"
+                      value={customSubjectName}
+                      onChange={(e) => setCustomSubjectName(e.target.value)}
+                      required
+                    />
+                    <Input
+                      placeholder="Subject Code (e.g., ETCS999A)"
+                      value={customSubjectCode}
+                      onChange={(e) => setCustomSubjectCode(e.target.value)}
+                      required
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="space-y-2">

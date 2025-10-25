@@ -21,6 +21,7 @@ export type Database = {
           exam_id: string | null
           id: string
           question_number: number
+          student_id: string | null
           updated_at: string | null
         }
         Insert: {
@@ -29,6 +30,7 @@ export type Database = {
           exam_id?: string | null
           id?: string
           question_number: number
+          student_id?: string | null
           updated_at?: string | null
         }
         Update: {
@@ -37,6 +39,7 @@ export type Database = {
           exam_id?: string | null
           id?: string
           question_number?: number
+          student_id?: string | null
           updated_at?: string | null
         }
         Relationships: [
@@ -45,6 +48,13 @@ export type Database = {
             columns: ["exam_id"]
             isOneToOne: false
             referencedRelation: "exams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "exam_answers_student_id_fkey"
+            columns: ["student_id"]
+            isOneToOne: false
+            referencedRelation: "students"
             referencedColumns: ["id"]
           },
         ]
@@ -91,6 +101,8 @@ export type Database = {
           created_by: string | null
           description: string | null
           id: string
+          subject_code: string
+          subject_name: string
           template_name: string
           total_questions: number | null
         }
@@ -99,6 +111,8 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          subject_code?: string
+          subject_name?: string
           template_name: string
           total_questions?: number | null
         }
@@ -107,6 +121,8 @@ export type Database = {
           created_by?: string | null
           description?: string | null
           id?: string
+          subject_code?: string
+          subject_name?: string
           template_name?: string
           total_questions?: number | null
         }
@@ -288,10 +304,7 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      generate_subject_code: {
-        Args: Record<PropertyKey, never>
-        Returns: string
-      }
+      generate_subject_code: { Args: never; Returns: string }
     }
     Enums: {
       [_ in never]: never

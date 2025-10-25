@@ -14,7 +14,9 @@ export class PDFGenerator {
   async generateStudentReport(
     studentName: string,
     studentId: string,
-    violations: ViolationData[]
+    violations: ViolationData[],
+    subjectName?: string,
+    subjectCode?: string
   ): Promise<string> {
     const pdf = new jsPDF();
     const pageWidth = pdf.internal.pageSize.getWidth();
@@ -29,24 +31,30 @@ export class PDFGenerator {
     pdf.setTextColor(0, 0, 0);
     pdf.text(`Student ID: ${studentId}`, 20, 40);
     pdf.text(`Student Name: ${studentName}`, 20, 48);
-    pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 56);
+    if (subjectName && subjectCode) {
+      pdf.text(`Subject: ${subjectName} (${subjectCode})`, 20, 56);
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 64);
+    } else {
+      pdf.text(`Generated: ${new Date().toLocaleString()}`, 20, 56);
+    }
     
     // Separator
+    const separatorY = subjectName ? 70 : 62;
     pdf.setLineWidth(0.5);
     pdf.setDrawColor(220, 38, 38);
-    pdf.line(20, 62, pageWidth - 20, 62);
+    pdf.line(20, separatorY, pageWidth - 20, separatorY);
     
     // Summary Section
     pdf.setFontSize(16);
-    pdf.text('Summary', 20, 75);
+    pdf.text('Summary', 20, separatorY + 13);
     
     pdf.setFontSize(12);
-    pdf.text(`Total Violations: ${violations.length}`, 20, 85);
-    pdf.text(`Report Generated: ${new Date().toLocaleString()}`, 20, 93);
+    pdf.text(`Total Violations: ${violations.length}`, 20, separatorY + 23);
+    pdf.text(`Report Generated: ${new Date().toLocaleString()}`, 20, separatorY + 31);
     
     // Violation Breakdown
     pdf.setFontSize(14);
-    pdf.text('Violation Breakdown', 20, 110);
+    pdf.text('Violation Breakdown', 20, separatorY + 48);
     
     // Count violations by type
     const violationCounts: { [key: string]: number } = {};
@@ -56,17 +64,18 @@ export class PDFGenerator {
     });
     
     // Table Header
+    const tableHeaderY = separatorY + 56;
     pdf.setFontSize(11);
     pdf.setFillColor(220, 38, 38);
-    pdf.rect(20, 118, pageWidth - 40, 8, 'F');
+    pdf.rect(20, tableHeaderY, pageWidth - 40, 8, 'F');
     pdf.setTextColor(255, 255, 255);
-    pdf.text('Violation Type', 25, 123);
-    pdf.text('Count', pageWidth / 2, 123);
-    pdf.text('Percentage', pageWidth - 60, 123);
+    pdf.text('Violation Type', 25, tableHeaderY + 5);
+    pdf.text('Count', pageWidth / 2, tableHeaderY + 5);
+    pdf.text('Percentage', pageWidth - 60, tableHeaderY + 5);
     
     // Table Rows
     pdf.setTextColor(0, 0, 0);
-    let yPos = 133;
+    let yPos = tableHeaderY + 15;
     Object.entries(violationCounts).forEach(([type, count], index) => {
       const percentage = ((count / violations.length) * 100).toFixed(1);
       
@@ -133,11 +142,12 @@ export class PDFGenerator {
   }
 
   async exportToCSV(violations: ViolationData[]): Promise<string> {
-    const headers = ['Timestamp', 'Violation Type', 'Severity', 'Details'];
+    const headers = ['Timestamp', 'Violation Type', 'Severity', 'Subject', 'Details'];
     const rows = violations.map(v => [
       new Date(v.timestamp).toLocaleString(),
       v.violation_type.replace(/_/g, ' '),
       v.severity,
+      (v as any).exams?.exam_templates?.subject_name || 'N/A',
       v.details?.message || ''
     ]);
     

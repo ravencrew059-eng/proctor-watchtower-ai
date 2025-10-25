@@ -65,6 +65,10 @@ const AdminDashboard = () => {
             name,
             email,
             student_id
+          ),
+          exam_templates (
+            subject_name,
+            subject_code
           )
         `)
         .order('started_at', { ascending: false });
@@ -73,7 +77,16 @@ const AdminDashboard = () => {
 
       const { data: violationsData } = await supabase
         .from('violations')
-        .select('*')
+        .select(`
+          *,
+          exams (
+            subject_code,
+            exam_templates (
+              subject_name,
+              subject_code
+            )
+          )
+        `)
         .order('timestamp', { ascending: false });
 
       setViolations(violationsData || []);
@@ -148,6 +161,8 @@ const AdminDashboard = () => {
           violationCount: studentViolations.length,
           violationTypes,
           violations: studentViolations,
+          subjectName: exam.exam_templates?.subject_name || 'N/A',
+          subjectCode: exam.exam_templates?.subject_code || exam.subject_code,
         };
       }
     });
@@ -183,7 +198,9 @@ const AdminDashboard = () => {
       const pdfUrl = await pdfGenerator.generateStudentReport(
         student.name,
         student.studentId,
-        student.violations
+        student.violations,
+        student.subjectName,
+        student.subjectCode
       );
       
       window.open(pdfUrl, '_blank');
@@ -411,6 +428,9 @@ const AdminDashboard = () => {
                         <div>
                           <h3 className="font-bold">{student.name}</h3>
                           <p className="text-sm text-muted-foreground">{student.studentId}</p>
+                          <p className="text-xs text-muted-foreground mt-1">
+                            <span className="font-medium">Subject:</span> {student.subjectName} ({student.subjectCode})
+                          </p>
                         </div>
                         <div className="flex items-center gap-2">
                           <AlertTriangle className="w-5 h-5 text-destructive" />
@@ -469,6 +489,11 @@ const AdminDashboard = () => {
                               {violation.severity}
                             </Badge>
                           </div>
+                          {violation.exams?.exam_templates && (
+                            <p className="text-xs text-muted-foreground mb-1">
+                              <span className="font-medium">Subject:</span> {violation.exams.exam_templates.subject_name} ({violation.exams.exam_templates.subject_code})
+                            </p>
+                          )}
                           <p className="text-sm text-muted-foreground mb-2">
                             {violation.details?.message || 'No details'}
                           </p>

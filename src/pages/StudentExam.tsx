@@ -152,9 +152,25 @@ const StudentExam = () => {
 
   const loadExamQuestions = async () => {
     try {
+      const data = sessionStorage.getItem('studentData');
+      if (!data) return;
+      
+      const parsedData = JSON.parse(data);
+      
+      // Get exam template ID for this subject
+      const { data: examData, error: examError } = await supabase
+        .from('exams')
+        .select('exam_template_id')
+        .eq('subject_code', parsedData.subjectCode)
+        .single();
+
+      if (examError) throw examError;
+
+      // Load questions for this exam template
       const { data: questionsData, error } = await supabase
         .from('exam_questions')
         .select('*')
+        .eq('exam_template_id', examData.exam_template_id)
         .order('question_number');
 
       if (error) throw error;
@@ -162,14 +178,11 @@ const StudentExam = () => {
       if (questionsData && questionsData.length > 0) {
         setQuestions(questionsData);
       } else {
-        setQuestions([
-          { id: 1, question_number: 1, question_text: "Explain the concept of artificial intelligence and its applications in modern proctoring systems.", question_type: "short_answer" },
-          { id: 2, question_number: 2, question_text: "Describe how computer vision techniques can be used for real-time monitoring.", question_type: "short_answer" },
-          { id: 3, question_number: 3, question_text: "What are the ethical considerations in AI-powered proctoring systems?", question_type: "short_answer" },
-        ]);
+        toast.error("No questions found for this exam");
       }
     } catch (error) {
       console.error('Error loading questions:', error);
+      toast.error("Failed to load exam questions");
     }
   };
 
@@ -232,7 +245,7 @@ const StudentExam = () => {
   };
 
   const handleSubmit = async () => {
-    if (!examId) return;
+    if (!examId || !studentData) return;
 
     try {
       const promises = Object.entries(answers).map(([questionNum, answer]) =>
@@ -240,6 +253,7 @@ const StudentExam = () => {
           .from('exam_answers')
           .upsert({
             exam_id: examId,
+            student_id: studentData.id,
             question_number: parseInt(questionNum),
             answer: answer,
             updated_at: new Date().toISOString()
@@ -287,7 +301,7 @@ const StudentExam = () => {
             </div>
             <div>
               <h1 className="font-bold">Proctored Exam</h1>
-              <p className="text-xs text-muted-foreground">{studentData.name} ({studentData.studentId})</p>
+              <p className="text-xs text-muted-foreground">{studentData.name} - {studentData.subjectName || studentData.subjectCode}</p>
             </div>
           </div>
           <div className="flex items-center gap-4">
