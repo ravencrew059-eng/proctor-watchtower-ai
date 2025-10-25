@@ -38,6 +38,13 @@ const StudentRegister = () => {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        // Explicitly play the video to ensure it starts
+        try {
+          await videoRef.current.play();
+          console.log('Video started playing');
+        } catch (playError) {
+          console.error('Error playing video:', playError);
+        }
       }
       
       streamRef.current = stream;
@@ -49,14 +56,26 @@ const StudentRegister = () => {
   };
 
   const captureFaceImage = () => {
-    if (!videoRef.current) return;
+    if (!videoRef.current) {
+      toast.error("Video not ready");
+      return;
+    }
+
+    // Check if video has valid dimensions
+    if (videoRef.current.videoWidth === 0 || videoRef.current.videoHeight === 0) {
+      toast.error("Please wait for camera to initialize");
+      return;
+    }
 
     const canvas = document.createElement('canvas');
     canvas.width = videoRef.current.videoWidth;
     canvas.height = videoRef.current.videoHeight;
     const ctx = canvas.getContext('2d');
     
-    if (!ctx) return;
+    if (!ctx) {
+      toast.error("Failed to capture image");
+      return;
+    }
     
     ctx.drawImage(videoRef.current, 0, 0);
     const imageDataUrl = canvas.toDataURL('image/jpeg', 0.8);
@@ -283,10 +302,11 @@ const StudentRegister = () => {
                 
                 {faceCapture && (
                   <div className="space-y-2">
-                    <div className="aspect-video bg-muted rounded-lg overflow-hidden">
+                    <div className="aspect-video bg-muted rounded-lg overflow-hidden border-2 border-primary">
                       <video 
                         ref={videoRef} 
                         autoPlay 
+                        playsInline
                         muted 
                         className="w-full h-full object-cover"
                       />
