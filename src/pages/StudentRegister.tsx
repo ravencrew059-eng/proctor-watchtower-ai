@@ -33,25 +33,41 @@ const StudentRegister = () => {
   const startFaceCapture = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { width: 640, height: 480 } 
+        video: { 
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+          facingMode: "user"
+        } 
       });
+      
+      streamRef.current = stream;
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        // Explicitly play the video to ensure it starts
-        try {
-          await videoRef.current.play();
-          console.log('Video started playing');
-        } catch (playError) {
-          console.error('Error playing video:', playError);
-        }
+        
+        // Wait for metadata to load, then play
+        videoRef.current.onloadedmetadata = async () => {
+          try {
+            if (videoRef.current) {
+              await videoRef.current.play();
+              console.log('Video playing successfully');
+              setFaceCapture(true);
+            }
+          } catch (playError) {
+            console.error('Error playing video:', playError);
+            toast.error("Failed to start video preview");
+          }
+        };
       }
-      
-      streamRef.current = stream;
-      setFaceCapture(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Camera error:', error);
-      toast.error("Camera access required for face registration");
+      if (error.name === 'NotAllowedError') {
+        toast.error("Camera permission denied. Please allow camera access.");
+      } else if (error.name === 'NotFoundError') {
+        toast.error("No camera found on this device");
+      } else {
+        toast.error("Camera access required for face registration");
+      }
     }
   };
 
@@ -91,10 +107,10 @@ const StudentRegister = () => {
     toast.success("Face captured successfully!");
   };
 
-  const retakeFaceImage = () => {
+  const retakeFaceImage = async () => {
     setFaceCaptured(false);
     setFaceImageUrl("");
-    startFaceCapture();
+    await startFaceCapture();
   };
 
   const uploadFaceImage = async (studentId: string, studentName: string): Promise<string> => {
@@ -302,14 +318,20 @@ const StudentRegister = () => {
                 
                 {faceCapture && (
                   <div className="space-y-2">
-                    <div className="aspect-video bg-muted rounded-lg overflow-hidden border-2 border-primary">
+                    <div className="relative aspect-video bg-black rounded-lg overflow-hidden border-2 border-primary">
                       <video 
                         ref={videoRef} 
                         autoPlay 
                         playsInline
                         muted 
                         className="w-full h-full object-cover"
+                        style={{ display: 'block' }}
                       />
+                      {!videoRef.current?.srcObject && (
+                        <div className="absolute inset-0 flex items-center justify-center text-white">
+                          <p className="text-sm">Initializing camera...</p>
+                        </div>
+                      )}
                     </div>
                     <Button 
                       type="button" 
