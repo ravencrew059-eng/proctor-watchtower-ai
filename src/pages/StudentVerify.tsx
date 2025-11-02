@@ -42,7 +42,7 @@ const StudentVerify = () => {
     setVerificationStarted(true);
     setProgress(0);
 
-    // Step 1: Camera Access
+    // Step 1: Camera & Microphone Access
     setChecks(prev => ({ ...prev, camera: { status: 'checking', message: 'Requesting access...' } }));
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -52,71 +52,177 @@ const StudentVerify = () => {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
 
       streamRef.current = stream;
-      await aiDetector.initialize();
-
       setChecks(prev => ({ ...prev, camera: { status: 'success', message: 'Camera connected' } }));
       setProgress(25);
 
-      // Step 2: Microphone
-      setTimeout(() => {
-        setChecks(prev => ({ ...prev, microphone: { status: 'checking', message: 'Testing microphone...' } }));
-        
-        setTimeout(() => {
-          setChecks(prev => ({ ...prev, microphone: { status: 'success', message: 'Microphone working' } }));
-          setProgress(50);
+      // Microphone check
+      setChecks(prev => ({ ...prev, microphone: { status: 'success', message: 'Microphone connected' } }));
+      setProgress(35);
 
-          // Step 3: Lighting
-          setTimeout(async () => {
-            setChecks(prev => ({ ...prev, lighting: { status: 'checking', message: 'Analyzing lighting...' } }));
+      await aiDetector.initialize();
+      await new Promise(resolve => setTimeout(resolve, 1000));
 
-            if (!videoRef.current) return;
-            const lightingResult = await aiDetector.checkLighting(videoRef.current);
+      // Step 2: Environment Check using Python Backend
+      setChecks(prev => ({ ...prev, lighting: { status: 'checking', message: 'Analyzing lighting...' }, face: { status: 'checking', message: 'Detecting face...' } }));
+      
+      if (videoRef.current) {
+        // Capture frame
+        const canvas = document.createElement('canvas');
+        canvas.width = videoRef.current.videoWidth;
+        canvas.height = videoRef.current.videoHeight;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(videoRef.current, 0, 0);
+          const frameBase64 = canvas.toDataURL('image/jpeg', 0.8);
 
-            if (!lightingResult.isGood) {
-              setChecks(prev => ({ ...prev, lighting: { status: 'error', message: 'Poor lighting detected' } }));
-              toast.error("Please improve lighting conditions");
-              return;
-            }
+          // Try Python backend first
+          const PYTHON_BACKEND_URL = import.meta.env.VITE_PROCTORING_API_URL || 'http://localhost:8000';
+          
+          try {
+            const response = await fetch(`${PYTHON_BACKEND_URL}/environment-check`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ frame_base64: frameBase64 }),
+            });
 
-            setChecks(prev => ({ ...prev, lighting: { status: 'success', message: 'Good lighting' } }));
-            setProgress(75);
-
-            // Step 4: Face Detection
-            setTimeout(async () => {
-              setChecks(prev => ({ ...prev, face: { status: 'checking', message: 'Detecting face...' } }));
-
-              if (!videoRef.current) return;
-              const faceCount = await aiDetector.detectFaces(videoRef.current);
-
-              if (faceCount === 0) {
-                setChecks(prev => ({ ...prev, face: { status: 'error', message: 'No face detected' } }));
-                toast.error("Please position yourself in front of camera");
-                return;
-              } else if (faceCount > 1) {
-                setChecks(prev => ({ ...prev, face: { status: 'error', message: 'Multiple faces detected' } }));
-                toast.error("Only one person allowed");
+            if (response.ok) {
+              const envCheck = await response.json();
+              
+              // Check lighting
+              if (envCheck.lighting_ok) {
+                setChecks(prev => ({ ...prev, lighting: { status: 'success', message: 'Good lighting' } }));
+                setProgress(60);
+              } else {
+                setChecks(prev => ({ ...prev, lighting: { status: 'error', message: 'Poor lighting detected' } }));
+                toast.error("Please improve lighting conditions");
                 return;
               }
 
-              setChecks(prev => ({ ...prev, face: { status: 'success', message: 'Face verified' } }));
-              setProgress(100);
+              // Check face detection
+              if (envCheck.face_detected && envCheck.face_centered) {
+                setChecks(prev => ({ ...prev, face: { status: 'success', message: 'Face verified' } }));
+                setProgress(85);
+              } else if (!envCheck.face_detected) {
+                setChecks(prev => ({ ...prev, face: { status: 'error', message: 'No face detected' } }));
+                toast.error("Please position yourself in front of the camera");
+                return;
+              } else {
+                setChecks(prev => ({ ...prev, face: { status: 'error', message: envCheck.message } }));
+                toast.error(envCheck.message || "Face not properly centered");
+                return;
+              }
 
-              toast.success("Verification complete!");
-              setTimeout(() => {
-                navigate('/student/exam');
-              }, 1500);
-            }, 1000);
-          }, 1000);
-        }, 1000);
-      }, 1000);
+              // Step 3: Calibrate head pose
+              const calibrateResponse = await fetch(`${PYTHON_BACKEND_URL}/calibrate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ frame_base64: frameBase64 }),
+              });
 
-    } catch (error) {
-      console.error('Camera access error:', error);
-      setChecks(prev => ({ ...prev, camera: { status: 'error', message: 'Access denied' } }));
-      toast.error("Please allow camera and microphone access");
+              if (calibrateResponse.ok) {
+                const calibration = await calibrateResponse.json();
+                if (calibration.success) {
+                  sessionStorage.setItem('calibration', JSON.stringify({
+                    pitch: calibration.pitch,
+                    yaw: calibration.yaw,
+                  }));
+                  toast.success("Calibration successful!");
+                }
+              }
+
+            } else {
+              // Fallback to local detection
+              console.warn('Python backend not available, using local detection');
+              
+              const lightingResult = await aiDetector.checkLighting(videoRef.current);
+              setChecks(prev => ({ 
+                ...prev, 
+                lighting: { 
+                  status: lightingResult.isGood ? 'success' : 'error',
+                  message: lightingResult.isGood ? 'Good lighting' : 'Poor lighting'
+                } 
+              }));
+              setProgress(60);
+
+              if (!lightingResult.isGood) {
+                toast.error("Poor lighting detected");
+                return;
+              }
+
+              const faceCount = await aiDetector.detectFaces(videoRef.current);
+              setChecks(prev => ({ 
+                ...prev, 
+                face: { 
+                  status: faceCount === 1 ? 'success' : 'error',
+                  message: faceCount === 1 ? 'Face verified' : (faceCount === 0 ? 'No face' : 'Multiple faces')
+                } 
+              }));
+              setProgress(85);
+
+              if (faceCount !== 1) {
+                toast.error(faceCount === 0 ? "No face detected" : "Multiple faces detected");
+                return;
+              }
+            }
+          } catch (error) {
+            console.error('Backend error:', error);
+            toast.warning("Using local verification");
+            
+            // Fallback to local detection
+            const lightingResult = await aiDetector.checkLighting(videoRef.current);
+            setChecks(prev => ({ 
+              ...prev, 
+              lighting: { 
+                status: lightingResult.isGood ? 'success' : 'error',
+                message: lightingResult.isGood ? 'Good lighting' : 'Poor lighting'
+              } 
+            }));
+            setProgress(60);
+
+            if (!lightingResult.isGood) {
+              toast.error("Poor lighting detected");
+              return;
+            }
+
+            const faceCount = await aiDetector.detectFaces(videoRef.current);
+            setChecks(prev => ({ 
+              ...prev, 
+              face: { 
+                status: faceCount === 1 ? 'success' : 'error',
+                message: faceCount === 1 ? 'Face verified' : (faceCount === 0 ? 'No face' : 'Multiple faces')
+              } 
+            }));
+            setProgress(85);
+
+            if (faceCount !== 1) {
+              toast.error(faceCount === 0 ? "No face detected" : "Multiple faces detected");
+              return;
+            }
+          }
+        }
+      }
+
+      await new Promise(resolve => setTimeout(resolve, 500));
+      setProgress(100);
+
+      toast.success("Verification complete! Starting exam...");
+      
+      setTimeout(() => {
+        navigate('/student/exam');
+      }, 1500);
+
+    } catch (error: any) {
+      console.error('Verification error:', error);
+      if (error.name === 'NotAllowedError') {
+        setChecks(prev => ({ ...prev, camera: { status: 'error', message: 'Access denied' } }));
+        toast.error("Please allow camera and microphone access");
+      } else {
+        toast.error("Verification failed: " + error.message);
+      }
     }
   };
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Clock, AlertTriangle, LogOut } from "lucide-react";
+import { Shield, Clock, AlertTriangle, LogOut, Wifi, WifiOff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { aiDetector } from "@/utils/aiDetection";
 import { violationLogger } from "@/utils/violationLogger";
+import { useProctoringWebSocket } from "@/hooks/useProctoringWebSocket";
 
 const StudentExam = () => {
   const navigate = useNavigate();
@@ -19,9 +20,59 @@ const StudentExam = () => {
   const [violationCount, setViolationCount] = useState(0);
   const [recentWarnings, setRecentWarnings] = useState<string[]>([]);
   const [questions, setQuestions] = useState<any[]>([]);
+  const [calibratedPitch, setCalibratedPitch] = useState(0);
+  const [calibratedYaw, setCalibratedYaw] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+
+  // WebSocket connection for Python backend
+  const { isConnected: wsConnected, sendFrame, sendAudioLevel } = useProctoringWebSocket({
+    sessionId: examId || '',
+    examId: examId || '',
+    studentId: studentData?.id || '',
+    studentName: studentData?.name || '',
+    calibratedPitch,
+    calibratedYaw,
+    onViolation: async (violation) => {
+      // Handle violation from Python backend
+      setViolationCount(prev => prev + 1);
+      const message = violation.type.replace(/_/g, ' ');
+      setRecentWarnings(prev => [message, ...prev].slice(0, 3));
+      toast.error(`Violation: ${message}`);
+
+      // Upload snapshot if available
+      if (violation.snapshot_base64 && examId && studentData) {
+        try {
+          const imageUrl = await violationLogger.uploadSnapshot(
+            examId,
+            studentData.id,
+            studentData.name,
+            violation.snapshot_base64,
+            violation.type
+          );
+
+          // Log to database
+          await supabase.from('violations').insert({
+            exam_id: examId,
+            student_id: studentData.id,
+            violation_type: violation.type,
+            severity: violation.severity,
+            image_url: imageUrl,
+            details: {
+              message: violation.message,
+              confidence: violation.confidence,
+            },
+          });
+        } catch (error) {
+          console.error('Error logging violation:', error);
+        }
+      }
+    },
+    enabled: !!examId && !!studentData,
+  });
 
   useEffect(() => {
     const data = sessionStorage.getItem('studentData');
@@ -91,9 +142,26 @@ const StudentExam = () => {
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
+        await videoRef.current.play();
       }
       
       streamRef.current = stream;
+
+      // Setup audio monitoring
+      audioContextRef.current = new AudioContext();
+      analyserRef.current = audioContextRef.current.createAnalyser();
+      const source = audioContextRef.current.createMediaStreamSource(stream);
+      source.connect(analyserRef.current);
+      analyserRef.current.fftSize = 256;
+
+      // Get calibration from session storage
+      const calibrationData = sessionStorage.getItem('calibration');
+      if (calibrationData) {
+        const { pitch, yaw } = JSON.parse(calibrationData);
+        setCalibratedPitch(pitch);
+        setCalibratedYaw(yaw);
+      }
+
       await aiDetector.initialize();
       startAIMonitoring();
     } catch (error) {
@@ -107,41 +175,69 @@ const StudentExam = () => {
       if (!videoRef.current || !streamRef.current || !examId || !studentData) return;
 
       try {
-        const violations = await aiDetector.detectObjects(videoRef.current);
-        
-        for (const violation of violations) {
+        // Capture frame and send to Python backend via WebSocket
+        if (wsConnected) {
           const snapshot = aiDetector.captureSnapshot(videoRef.current);
           
-          await violationLogger.logDetectionViolation(
-            examId,
-            studentData.id,
-            studentData.name,
-            violation,
-            snapshot
-          );
+          // Get audio level
+          let audioLevel = 0;
+          if (analyserRef.current) {
+            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          }
 
-          setViolationCount(prev => prev + 1);
-          const message = violation.type.replace(/_/g, ' ');
-          setRecentWarnings(prev => [message, ...prev].slice(0, 3));
+          // Send frame to Python backend
+          sendFrame(snapshot, audioLevel);
+
+          // Also send audio level separately
+          if (audioLevel > 0) {
+            sendAudioLevel(audioLevel);
+          }
+        } else {
+          // Fallback to local detection if WebSocket not connected
+          const violations = await aiDetector.detectObjects(videoRef.current);
           
-          toast.error(`Violation: ${message}`);
-        }
-
-        const audioLevel = await aiDetector.analyzeAudioLevel(streamRef.current);
-        if (audioLevel.isNoisy) {
-          const shouldLog = aiDetector.incrementViolation('audioNoise');
-          if (shouldLog) {
+          for (const violation of violations) {
             const snapshot = aiDetector.captureSnapshot(videoRef.current);
+            
             await violationLogger.logDetectionViolation(
               examId,
               studentData.id,
               studentData.name,
-              { type: 'audio_noise', confidence: 0.8, timestamp: new Date() },
+              violation,
               snapshot
             );
+
             setViolationCount(prev => prev + 1);
-            setRecentWarnings(prev => ['Suspicious audio', ...prev].slice(0, 3));
-            aiDetector.resetViolation('audioNoise');
+            const message = violation.type.replace(/_/g, ' ');
+            setRecentWarnings(prev => [message, ...prev].slice(0, 3));
+            
+            toast.error(`Violation: ${message}`);
+          }
+
+          // Check audio level locally
+          if (analyserRef.current) {
+            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+            analyserRef.current.getByteFrequencyData(dataArray);
+            const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
+
+            if (audioLevel > 50) {
+              const shouldLog = aiDetector.incrementViolation('audioNoise');
+              if (shouldLog) {
+                const snapshot = aiDetector.captureSnapshot(videoRef.current);
+                await violationLogger.logDetectionViolation(
+                  examId,
+                  studentData.id,
+                  studentData.name,
+                  { type: 'audio_noise', confidence: 0.8, timestamp: new Date() },
+                  snapshot
+                );
+                setViolationCount(prev => prev + 1);
+                setRecentWarnings(prev => ['Suspicious audio', ...prev].slice(0, 3));
+                aiDetector.resetViolation('audioNoise');
+              }
+            }
           }
         }
       } catch (error) {
@@ -306,6 +402,11 @@ const StudentExam = () => {
           </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
+              {wsConnected ? (
+                <Wifi className="w-4 h-4 text-green-500" />
+              ) : (
+                <WifiOff className="w-4 h-4 text-orange-500" />
+              )}
               <Clock className="w-4 h-4" />
               <span className="text-lg font-mono font-bold">{formatTime(timeRemaining)}</span>
             </div>
