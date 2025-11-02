@@ -10,6 +10,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { aiDetector } from "@/utils/aiDetection";
 import { violationLogger } from "@/utils/violationLogger";
 import { useProctoringWebSocket } from "@/hooks/useProctoringWebSocket";
+import { AudioMonitor } from "@/components/AudioMonitor";
+import { BrowserActivityMonitor } from "@/components/BrowserActivityMonitor";
 
 const StudentExam = () => {
   const navigate = useNavigate();
@@ -22,6 +24,10 @@ const StudentExam = () => {
   const [questions, setQuestions] = useState<any[]>([]);
   const [calibratedPitch, setCalibratedPitch] = useState(0);
   const [calibratedYaw, setCalibratedYaw] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
+  const [tabSwitchCount, setTabSwitchCount] = useState(0);
+  const [copyPasteCount, setCopyPasteCount] = useState(0);
+  const [windowFocused, setWindowFocused] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const detectionIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -101,14 +107,17 @@ const StudentExam = () => {
 
     const handleVisibilityChange = () => {
       if (document.hidden && examId && studentData) {
+        setTabSwitchCount(prev => prev + 1);
         recordViolation('tab_switch', 'Tab switched');
         setRecentWarnings(prev => ['Tab switching detected', ...prev].slice(0, 3));
       }
+      setWindowFocused(!document.hidden);
     };
 
     const handleCopyPaste = (e: Event) => {
       e.preventDefault();
       if (examId && studentData) {
+        setCopyPasteCount(prev => prev + 1);
         recordViolation('copy_paste', 'Copy/paste attempted');
         setRecentWarnings(prev => ['Copy/paste detected', ...prev].slice(0, 3));
       }
@@ -220,9 +229,10 @@ const StudentExam = () => {
           if (analyserRef.current) {
             const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
             analyserRef.current.getByteFrequencyData(dataArray);
-            const audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            const currentAudioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
+            setAudioLevel(currentAudioLevel);
 
-            if (audioLevel > 50) {
+            if (currentAudioLevel > 50) {
               const shouldLog = aiDetector.incrementViolation('audioNoise');
               if (shouldLog) {
                 const snapshot = aiDetector.captureSnapshot(videoRef.current);
@@ -459,16 +469,34 @@ const StudentExam = () => {
                   <Badge variant="destructive" className="text-xs">LIVE</Badge>
                 </div>
                 
-                <div className="aspect-video bg-muted rounded-lg overflow-hidden">
+                <div className="relative aspect-video bg-muted rounded-lg overflow-hidden border-2 border-primary">
                   <video 
                     ref={videoRef} 
                     autoPlay 
                     muted 
                     className="w-full h-full object-cover"
                   />
+                  <div className="absolute top-2 left-2 flex flex-col gap-1">
+                    <Badge variant="destructive" className="text-xs">
+                      🔴 MONITORING
+                    </Badge>
+                    <Badge className="text-xs bg-green-600">
+                      ✓ Active Monitoring
+                    </Badge>
+                  </div>
                 </div>
               </CardContent>
             </Card>
+
+            {/* Audio Monitor */}
+            <AudioMonitor audioLevel={audioLevel} threshold={30} />
+
+            {/* Browser Activity Monitor */}
+            <BrowserActivityMonitor 
+              tabSwitches={tabSwitchCount}
+              copyPasteEvents={copyPasteCount}
+              windowFocus={windowFocused}
+            />
 
             {/* Active Alerts */}
             <Card>
