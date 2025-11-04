@@ -34,6 +34,8 @@ const StudentRegister = () => {
   const startFaceCapture = async () => {
     try {
       setVideoPlaying(false);
+      setFaceCapture(true); // Show video container immediately
+      
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: { ideal: 640 },
@@ -51,7 +53,6 @@ const StudentRegister = () => {
         videoRef.current.onplaying = () => {
           console.log('Video is now playing');
           setVideoPlaying(true);
-          setFaceCapture(true);
         };
         
         // Wait for metadata to load, then play
@@ -69,6 +70,7 @@ const StudentRegister = () => {
       }
     } catch (error: any) {
       console.error('Camera error:', error);
+      setFaceCapture(false); // Hide video container on error
       if (error.name === 'NotAllowedError') {
         toast.error("Camera permission denied. Please allow camera access.");
       } else if (error.name === 'NotFoundError') {
