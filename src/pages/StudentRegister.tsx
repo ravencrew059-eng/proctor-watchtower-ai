@@ -19,6 +19,7 @@ const StudentRegister = () => {
   const [faceCapture, setFaceCapture] = useState(false);
   const [faceCaptured, setFaceCaptured] = useState(false);
   const [faceImageUrl, setFaceImageUrl] = useState("");
+  const [videoPlaying, setVideoPlaying] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -32,6 +33,7 @@ const StudentRegister = () => {
 
   const startFaceCapture = async () => {
     try {
+      setVideoPlaying(false);
       const stream = await navigator.mediaDevices.getUserMedia({ 
         video: { 
           width: { ideal: 640 },
@@ -45,17 +47,23 @@ const StudentRegister = () => {
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         
+        // Listen for when video actually starts playing
+        videoRef.current.onplaying = () => {
+          console.log('Video is now playing');
+          setVideoPlaying(true);
+          setFaceCapture(true);
+        };
+        
         // Wait for metadata to load, then play
         videoRef.current.onloadedmetadata = async () => {
           try {
             if (videoRef.current) {
               await videoRef.current.play();
-              console.log('Video playing successfully');
-              setFaceCapture(true);
+              console.log('Play() called successfully');
             }
           } catch (playError) {
             console.error('Error playing video:', playError);
-            toast.error("Failed to start video preview");
+            toast.error("Failed to start video preview. Please try again.");
           }
         };
       }
@@ -110,6 +118,7 @@ const StudentRegister = () => {
   const retakeFaceImage = async () => {
     setFaceCaptured(false);
     setFaceImageUrl("");
+    setVideoPlaying(false);
     await startFaceCapture();
   };
 
@@ -327,9 +336,19 @@ const StudentRegister = () => {
                         className="w-full h-full object-cover"
                         style={{ display: 'block' }}
                       />
-                      {!videoRef.current?.srcObject && (
-                        <div className="absolute inset-0 flex items-center justify-center text-white">
-                          <p className="text-sm">Initializing camera...</p>
+                      {!videoPlaying && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-black/50 text-white">
+                          <div className="text-center">
+                            <div className="animate-pulse mb-2">
+                              <Camera className="w-8 h-8 mx-auto" />
+                            </div>
+                            <p className="text-sm">Starting camera...</p>
+                          </div>
+                        </div>
+                      )}
+                      {videoPlaying && (
+                        <div className="absolute top-2 left-2 bg-green-500 text-white text-xs px-2 py-1 rounded">
+                          ● Live
                         </div>
                       )}
                     </div>
@@ -337,8 +356,9 @@ const StudentRegister = () => {
                       type="button" 
                       className="w-full" 
                       onClick={captureFaceImage}
+                      disabled={!videoPlaying}
                     >
-                      Take Photo
+                      {videoPlaying ? "Take Photo" : "Waiting for camera..."}
                     </Button>
                   </div>
                 )}
