@@ -9,6 +9,7 @@ import StudentVerify from "./pages/StudentVerify";
 import StudentExam from "./pages/StudentExam";
 import AdminLogin from "./pages/AdminLogin";
 import AdminDashboard from "./pages/AdminDashboard";
+import AdminMonitor from "./pages/AdminMonitor";
 import NotFound from "./pages/NotFound";
 import ExamTemplateUpload from "./pages/ExamTemplateUpload";
 
@@ -27,6 +28,7 @@ const App = () => (
         <Route path="/student/exam" element={<StudentExam />} />
         <Route path="/admin/login" element={<AdminLogin />} />
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        <Route path="/admin/monitor" element={<AdminMonitor />} />
         <Route path="/admin/upload-template" element={<ExamTemplateUpload />} />
         <Route path="*" element={<NotFound />} />
         </Routes>

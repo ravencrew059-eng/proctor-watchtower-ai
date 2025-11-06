@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { Shield, Activity, Users, AlertTriangle, LogOut, Upload, RefreshCw, Download, FileText, Eye } from "lucide-react";
+import { Shield, Activity, Users, AlertTriangle, LogOut, Upload, RefreshCw, Download, FileText, Eye, Monitor } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -246,6 +246,10 @@ const AdminDashboard = () => {
             </div>
           </div>
           <div className="flex gap-2">
+            <Button variant="default" size="sm" onClick={() => navigate('/admin/monitor')}>
+              <Monitor className="w-4 h-4 mr-2" />
+              Live Monitor
+            </Button>
             <Button variant="outline" size="sm" onClick={loadDashboardData}>
               <RefreshCw className="w-4 h-4 mr-2" />
               Refresh
