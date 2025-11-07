@@ -268,6 +268,7 @@ const StudentExam = () => {
         .from('exams')
         .select('exam_template_id')
         .eq('subject_code', parsedData.subjectCode)
+        .eq('student_id', parsedData.id)
         .single();
 
       if (examError) throw examError;
@@ -309,6 +310,7 @@ const StudentExam = () => {
         .from('exams')
         .select('id')
         .eq('subject_code', data.subjectCode)
+        .eq('student_id', data.id)
         .single();
 
       if (error) throw error;
