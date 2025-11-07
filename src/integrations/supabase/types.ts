@@ -100,6 +100,7 @@ export type Database = {
           created_at: string | null
           created_by: string | null
           description: string | null
+          duration_minutes: number | null
           id: string
           subject_code: string
           subject_name: string
@@ -110,6 +111,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           description?: string | null
+          duration_minutes?: number | null
           id?: string
           subject_code?: string
           subject_name?: string
@@ -120,6 +122,7 @@ export type Database = {
           created_at?: string | null
           created_by?: string | null
           description?: string | null
+          duration_minutes?: number | null
           id?: string
           subject_code?: string
           subject_name?: string

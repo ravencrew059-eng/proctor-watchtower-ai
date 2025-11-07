@@ -27,6 +27,7 @@ const ExamTemplateUpload = () => {
   const [selectedSubject, setSelectedSubject] = useState<string>("");
   const [customSubjectName, setCustomSubjectName] = useState("");
   const [customSubjectCode, setCustomSubjectCode] = useState("");
+  const [duration, setDuration] = useState<number>(15);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
@@ -115,30 +116,33 @@ const ExamTemplateUpload = () => {
           total_questions: questions.length,
           created_by: 'admin',
           subject_code: subjectCode,
-          subject_name: subjectName
+          subject_name: subjectName,
+          duration_minutes: duration
         })
         .select()
         .single();
 
       if (templateError) throw templateError;
 
-      // Insert questions
+      // Insert questions - detect MCQ automatically if options exist
       const questionInserts = questions.map((q: any, index: number) => {
-        const questionType = q.type?.toLowerCase() || 'short_answer';
+        // Check if question has options (MCQ format)
+        const hasOptions = q.Option_A || q.Option_B || q.Option_C || q.Option_D;
+        const questionType = hasOptions ? 'mcq' : 'short_answer';
         
         return {
           exam_template_id: templateData.id,
-          question_number: index + 1,
-          question_text: q.question || q.Question || q.text || '',
+          question_number: q.Question_No || index + 1,
+          question_text: q.Question || q.question || q.text || '',
           question_type: questionType,
-          options: questionType === 'mcq' ? {
-            a: q.option_a || q.OptionA || '',
-            b: q.option_b || q.OptionB || '',
-            c: q.option_c || q.OptionC || '',
-            d: q.option_d || q.OptionD || ''
+          options: hasOptions ? {
+            a: q.Option_A || '',
+            b: q.Option_B || '',
+            c: q.Option_C || '',
+            d: q.Option_D || ''
           } : null,
-          correct_answer: q.correct_answer || q.CorrectAnswer || null,
-          points: q.points || 1
+          correct_answer: q.Correct_Answer || q.correct_answer || null,
+          points: q.Points || q.points || 1
         };
       });
 
@@ -203,6 +207,21 @@ const ExamTemplateUpload = () => {
                   onChange={(e) => setTemplateName(e.target.value)}
                   required
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">Exam Duration (minutes)</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  min="1"
+                  max="300"
+                  placeholder="15"
+                  value={duration}
+                  onChange={(e) => setDuration(parseInt(e.target.value) || 15)}
+                  required
+                />
+                <p className="text-xs text-muted-foreground">Default: 15 minutes</p>
               </div>
 
               {/* Subject Selection */}
@@ -291,19 +310,19 @@ const ExamTemplateUpload = () => {
             <ul className="space-y-2 text-sm text-muted-foreground">
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>
-                Column headers: question, type (mcq/short_answer), option_a, option_b, option_c, option_d, correct_answer, points
+                Required columns: Question_No, Question, Option_A, Option_B, Option_C, Option_D
               </li>
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>
-                For MCQ: type = "mcq", fill options a-d, specify correct_answer (a/b/c/d)
+                For MCQ: Fill all Option_A through Option_D columns with answer choices
               </li>
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>
-                For Short Answer: type = "short_answer", question text only
+                Optional columns: Correct_Answer, Points (defaults to 1 point per question)
               </li>
               <li className="flex items-start gap-2">
                 <div className="w-1.5 h-1.5 rounded-full bg-primary mt-1.5"></div>
-                Default points per question: 1 (can be customized)
+                Questions with options automatically detected as MCQ, otherwise short answer
               </li>
             </ul>
           </CardContent>

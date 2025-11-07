@@ -272,6 +272,17 @@ const StudentExam = () => {
 
       if (examError) throw examError;
 
+      // Get template duration
+      const { data: templateData } = await supabase
+        .from('exam_templates')
+        .select('duration_minutes')
+        .eq('id', examData.exam_template_id)
+        .single();
+
+      // Set exam duration from template (default 15 minutes)
+      const durationMinutes = templateData?.duration_minutes || 15;
+      setTimeRemaining(durationMinutes * 60);
+
       // Load questions for this exam template
       const { data: questionsData, error } = await supabase
         .from('exam_questions')
@@ -438,17 +449,51 @@ const StudentExam = () => {
                 
                 <div className="space-y-8">
                   {questions.map((question, index) => (
-                    <div key={question.id} className="space-y-3">
-                      <h3 className="font-semibold">Question {index + 1}:</h3>
-                      <p className="text-muted-foreground">{question.question_text}</p>
+                    <div key={question.id} className="space-y-4 p-4 border rounded-lg">
+                      <div className="flex items-start gap-2">
+                        <span className="font-semibold text-primary">Q{question.question_number}.</span>
+                        <p className="font-medium flex-1">{question.question_text}</p>
+                      </div>
                       
-                      <Textarea
-                        placeholder="Type your answer here..."
-                        value={answers[question.id] || ''}
-                        onChange={(e) => setAnswers({ ...answers, [question.id]: e.target.value })}
-                        rows={6}
-                        className="resize-none"
-                      />
+                      {question.question_type === 'mcq' && question.options ? (
+                        <div className="space-y-3 ml-6">
+                          {Object.entries(question.options).map(([key, value]: [string, any]) => (
+                            <label
+                              key={key}
+                              className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all hover:bg-accent ${
+                                answers[question.question_number] === key
+                                  ? 'border-primary bg-primary/5'
+                                  : 'border-border'
+                              }`}
+                            >
+                              <input
+                                type="radio"
+                                name={`question-${question.question_number}`}
+                                value={key}
+                                checked={answers[question.question_number] === key}
+                                onChange={(e) =>
+                                  setAnswers({ ...answers, [question.question_number]: e.target.value })
+                                }
+                                className="mt-1"
+                              />
+                              <div className="flex-1">
+                                <span className="font-semibold text-sm uppercase mr-2">{key})</span>
+                                <span>{value}</span>
+                              </div>
+                            </label>
+                          ))}
+                        </div>
+                      ) : (
+                        <Textarea
+                          placeholder="Type your answer here..."
+                          value={answers[question.question_number] || ''}
+                          onChange={(e) =>
+                            setAnswers({ ...answers, [question.question_number]: e.target.value })
+                          }
+                          rows={6}
+                          className="resize-none ml-6"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
