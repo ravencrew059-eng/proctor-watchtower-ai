@@ -28,12 +28,39 @@ const ExamTemplateUpload = () => {
   const [customSubjectName, setCustomSubjectName] = useState("");
   const [customSubjectCode, setCustomSubjectCode] = useState("");
   const [duration, setDuration] = useState<number>(15);
+  const [previewQuestions, setPreviewQuestions] = useState<any[]>([]);
+  const [showPreview, setShowPreview] = useState(false);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       if (selectedFile.name.endsWith('.xlsx') || selectedFile.name.endsWith('.xls')) {
         setFile(selectedFile);
+        // Parse and preview immediately
+        try {
+          const parsedData = await parseExcelFile(selectedFile);
+          const processedQuestions = parsedData.map((q: any, index: number) => {
+            const hasOptions = q.Question_No || q.Question || q.Option_A || q.Option_B;
+            return {
+              question_number: q.Question_No || index + 1,
+              question_text: q.Question || '',
+              question_type: (q.Option_A || q.Option_B) ? 'mcq' : 'short_answer',
+              options: (q.Option_A || q.Option_B) ? {
+                a: q.Option_A || '',
+                b: q.Option_B || '',
+                c: q.Option_C || '',
+                d: q.Option_D || ''
+              } : null,
+              correct_answer: q.Correct_Answer || null,
+              points: q.Points || 1
+            };
+          });
+          setPreviewQuestions(processedQuestions);
+          setShowPreview(true);
+        } catch (error) {
+          console.error('Error parsing file:', error);
+          toast.error("Failed to parse Excel file");
+        }
       } else {
         toast.error("Please select an Excel file (.xlsx or .xls)");
       }
@@ -296,13 +323,69 @@ const ExamTemplateUpload = () => {
                 )}
               </div>
 
-              <Button type="submit" className="w-full" size="lg" disabled={loading}>
+              <Button type="submit" className="w-full" size="lg" disabled={loading || previewQuestions.length === 0}>
                 <Upload className="w-4 h-4 mr-2" />
                 {loading ? "Uploading..." : "Upload Template"}
               </Button>
             </form>
           </CardContent>
         </Card>
+
+        {/* Preview Section */}
+        {showPreview && previewQuestions.length > 0 && (
+          <Card className="mt-6">
+            <CardContent className="p-6">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-semibold">Preview Questions ({previewQuestions.length})</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowPreview(false)}
+                >
+                  Hide Preview
+                </Button>
+              </div>
+              
+              <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
+                {previewQuestions.map((q, index) => (
+                  <Card key={index} className="border-2">
+                    <CardContent className="p-4">
+                      <div className="flex items-start gap-3 mb-3">
+                        <span className="font-semibold text-primary text-lg">Q{q.question_number}.</span>
+                        <div className="flex-1">
+                          <p className="font-medium">{q.question_text}</p>
+                          <span className="text-xs text-muted-foreground mt-1 inline-block">
+                            Type: {q.question_type === 'mcq' ? 'Multiple Choice' : 'Short Answer'} | Points: {q.points}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {q.question_type === 'mcq' && q.options && (
+                        <div className="ml-8 space-y-2">
+                          {Object.entries(q.options).map(([key, value]: [string, any]) => (
+                            value && (
+                              <div key={key} className="flex items-start gap-2 p-2 rounded bg-muted/50">
+                                <span className="font-semibold text-sm uppercase min-w-[20px]">{key})</span>
+                                <span className="text-sm">{value}</span>
+                              </div>
+                            )
+                          ))}
+                          {q.correct_answer && (
+                            <div className="mt-2 p-2 rounded bg-green-500/10 border border-green-500/20">
+                              <span className="text-xs font-semibold text-green-700 dark:text-green-400">
+                                Correct Answer: {q.correct_answer}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <Card className="mt-6 bg-muted/50">
           <CardContent className="p-6">
