@@ -125,7 +125,7 @@ export class PDFGenerator {
     const fileName = `${studentName.replace(/\s+/g, '_')}/reports/violation_report_${Date.now()}.pdf`;
     
     const { data, error } = await supabase.storage
-      .from('violation-evidence')
+      .from('exam-reports')
       .upload(fileName, pdfBlob, {
         cacheControl: '3600',
         upsert: false
@@ -134,7 +134,7 @@ export class PDFGenerator {
     if (error) throw error;
 
     const { data: { publicUrl } } = supabase.storage
-      .from('violation-evidence')
+      .from('exam-reports')
       .getPublicUrl(fileName);
 
     return publicUrl;
