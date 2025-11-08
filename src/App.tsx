@@ -12,6 +12,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminMonitor from "./pages/AdminMonitor";
 import NotFound from "./pages/NotFound";
 import ExamTemplateUpload from "./pages/ExamTemplateUpload";
+import StudentReport from "./pages/StudentReport";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/admin/monitor" element={<AdminMonitor />} />
         <Route path="/admin/upload-template" element={<ExamTemplateUpload />} />
+        <Route path="/admin/student-report" element={<StudentReport />} />
         <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

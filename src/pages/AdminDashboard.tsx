@@ -451,13 +451,21 @@ const AdminDashboard = () => {
                       </div>
 
                       <div className="flex gap-2">
+                        <Button 
+                          size="sm" 
+                          variant="default" 
+                          onClick={() => navigate(`/admin/student-report?studentId=${student.id}&examId=${examSessions.find(e => e.student_id === student.id)?.id}`)}
+                        >
+                          <Eye className="w-4 h-4 mr-1" />
+                          View Details
+                        </Button>
                         <Button size="sm" variant="outline" onClick={() => handleExportCSV(student)}>
                           <Download className="w-4 h-4 mr-1" />
                           CSV
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => handleGenerateReport(student)}>
                           <FileText className="w-4 h-4 mr-1" />
-                          Report
+                          PDF
                         </Button>
                       </div>
                     </div>
