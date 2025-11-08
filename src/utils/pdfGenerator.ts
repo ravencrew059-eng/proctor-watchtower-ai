@@ -127,7 +127,6 @@ export class PDFGenerator {
     const { data, error } = await supabase.storage
       .from('violation-evidence')
       .upload(fileName, pdfBlob, {
-        contentType: 'application/pdf',
         cacheControl: '3600',
         upsert: false
       });

@@ -108,14 +108,18 @@ const StudentReport = () => {
 
       if (answersError) throw answersError;
 
-      // Fetch questions to join with answers
-      const { data: questionsData, error: questionsError } = await supabase
-        .from('exam_questions')
-        .select('*')
-        .eq('exam_template_id', examData.exam_template_id)
-        .order('question_number');
+      // Fetch questions to join with answers - only if exam_template_id exists
+      let questionsData = null;
+      if (examData.exam_template_id) {
+        const { data, error: questionsError } = await supabase
+          .from('exam_questions')
+          .select('*')
+          .eq('exam_template_id', examData.exam_template_id)
+          .order('question_number');
 
-      if (questionsError) throw questionsError;
+        if (questionsError) throw questionsError;
+        questionsData = data;
+      }
 
       // Merge answers with questions
       const answersWithQuestions = (answersData || []).map(answer => {
@@ -145,7 +149,7 @@ const StudentReport = () => {
           id: studentData.id,
           name: studentData.name,
           email: studentData.email,
-          student_id: studentData.student_id || 'N/A',
+          student_id: studentData.student_id || studentData.email || 'N/A',
         },
         exam: {
           id: examData.id,

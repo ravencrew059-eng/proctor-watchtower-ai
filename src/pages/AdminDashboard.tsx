@@ -246,7 +246,11 @@ const AdminDashboard = () => {
             </div>
           </div>
           <div className="flex gap-2">
-            <Button variant="default" size="sm" onClick={() => navigate('/admin/monitor')}>
+            <Button variant="default" size="sm" onClick={() => navigate('/admin/analytics')}>
+              <Activity className="w-4 h-4 mr-2" />
+              Analytics
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => navigate('/admin/monitor')}>
               <Monitor className="w-4 h-4 mr-2" />
               Live Monitor
             </Button>
