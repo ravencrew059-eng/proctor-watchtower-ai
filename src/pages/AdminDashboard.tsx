@@ -35,6 +35,7 @@ const AdminDashboard = () => {
 
     loadDashboardData();
 
+    // Real-time subscriptions
     const violationSubscription = supabase
       .channel('violations-channel')
       .on('postgres_changes', 
@@ -47,11 +48,23 @@ const AdminDashboard = () => {
       )
       .subscribe();
 
+    const examsSubscription = supabase
+      .channel('exams-channel')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'exams' },
+        () => {
+          loadDashboardData();
+        }
+      )
+      .subscribe();
+
+    // Auto-refresh every 10 seconds
     const interval = setInterval(loadDashboardData, 10000);
 
     return () => {
       clearInterval(interval);
       supabase.removeChannel(violationSubscription);
+      supabase.removeChannel(examsSubscription);
     };
   }, [navigate]);
 
@@ -79,6 +92,10 @@ const AdminDashboard = () => {
         .from('violations')
         .select(`
           *,
+          students (
+            name,
+            email
+          ),
           exams (
             subject_code,
             exam_templates (
@@ -137,7 +154,7 @@ const AdminDashboard = () => {
     });
 
     const data = Object.entries(hourlyData)
-      .map(([time, count]) => ({ time, violations: count }))
+      .map(([time, violations]) => ({ time, violations }))
       .slice(-10);
 
     setChartData(data);
@@ -232,6 +249,21 @@ const AdminDashboard = () => {
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
   };
 
+  const getViolationTypeIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      'phone': '📱',
+      'multiple_person': '👥',
+      'no_person': '❌',
+      'object': '📦',
+      'looking_away': '👀',
+      'audio_noise': '🔊',
+      'tab_switch': '🗂️',
+      'copy_detected': '📋',
+      'paste_detected': '📌'
+    };
+    return icons[type] || '⚠️';
+  };
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b bg-card">
@@ -294,9 +326,9 @@ const AdminDashboard = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Active Now</p>
-                  <p className="text-3xl font-bold text-success">{stats.activeNow}</p>
+                  <p className="text-3xl font-bold text-green-600">{stats.activeNow}</p>
                 </div>
-                <Users className="w-8 h-8 text-success" />
+                <Users className="w-8 h-8 text-green-600" />
               </div>
             </CardContent>
           </Card>
@@ -318,9 +350,9 @@ const AdminDashboard = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-sm text-muted-foreground">Total Violations</p>
-                  <p className="text-3xl font-bold text-destructive">{stats.totalViolations}</p>
+                  <p className="text-3xl font-bold text-red-600">{stats.totalViolations}</p>
                 </div>
-                <AlertTriangle className="w-8 h-8 text-destructive" />
+                <AlertTriangle className="w-8 h-8 text-red-600" />
               </div>
             </CardContent>
           </Card>
@@ -329,7 +361,7 @@ const AdminDashboard = () => {
             <CardContent className="p-6">
               <div>
                 <p className="text-sm text-muted-foreground">Avg Violations/Student</p>
-                <p className="text-3xl font-bold text-warning">{stats.avgViolationsPerStudent}</p>
+                <p className="text-3xl font-bold text-orange-600">{stats.avgViolationsPerStudent}</p>
               </div>
             </CardContent>
           </Card>
@@ -363,7 +395,13 @@ const AdminDashboard = () => {
                 <XAxis dataKey="time" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="violations" stroke="hsl(var(--destructive))" strokeWidth={2} dot={{ r: 4 }} />
+                <Line 
+                  type="monotone" 
+                  dataKey="violations" 
+                  stroke="#ef4444" 
+                  strokeWidth={2} 
+                  dot={{ r: 4 }} 
+                />
               </LineChart>
             </ResponsiveContainer>
           </CardContent>
@@ -386,7 +424,7 @@ const AdminDashboard = () => {
                 .slice(0, 8)
                 .map((violation) => (
                   <div key={violation.id} className="relative group">
-                    <div className="aspect-video rounded-lg overflow-hidden border-2 border-border hover:border-destructive transition-colors">
+                    <div className="aspect-video rounded-lg overflow-hidden border-2 border-border hover:border-red-500 transition-colors">
                       <img 
                         src={violation.image_url} 
                         alt={violation.violation_type}
@@ -398,10 +436,11 @@ const AdminDashboard = () => {
                     </div>
                     <div className="absolute top-2 left-2">
                       <Badge variant="destructive" className="text-xs">
-                        {violation.violation_type.replace(/_/g, ' ')}
+                        {getViolationTypeIcon(violation.violation_type)} {violation.violation_type.replace(/_/g, ' ')}
                       </Badge>
                     </div>
                     <div className="mt-2">
+                      <p className="text-xs font-medium">{violation.students?.name || 'Unknown'}</p>
                       <p className="text-xs text-muted-foreground">
                         {formatDate(violation.timestamp)}
                       </p>
@@ -441,15 +480,15 @@ const AdminDashboard = () => {
                           </p>
                         </div>
                         <div className="flex items-center gap-2">
-                          <AlertTriangle className="w-5 h-5 text-destructive" />
-                          <span className="font-bold text-destructive">{student.violationCount} Violations</span>
+                          <AlertTriangle className="w-5 h-5 text-red-600" />
+                          <span className="font-bold text-red-600">{student.violationCount} Violations</span>
                         </div>
                       </div>
                       
                       <div className="flex flex-wrap gap-2 mb-3">
                         {student.violationTypes.map((type: string) => (
                           <Badge key={type} variant="secondary" className="text-xs">
-                            {type.replace(/_/g, ' ')}
+                            {getViolationTypeIcon(type)} {type.replace(/_/g, ' ')}
                           </Badge>
                         ))}
                       </div>
@@ -461,82 +500,30 @@ const AdminDashboard = () => {
                           onClick={() => navigate(`/admin/student-report?studentId=${student.id}&examId=${examSessions.find(e => e.student_id === student.id)?.id}`)}
                         >
                           <Eye className="w-4 h-4 mr-1" />
-                          View Details
+                          View Report
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleExportCSV(student)}>
-                          <Download className="w-4 h-4 mr-1" />
-                          CSV
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => handleGenerateReport(student)}>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleGenerateReport(student)}
+                        >
                           <FileText className="w-4 h-4 mr-1" />
-                          PDF
+                          Generate PDF
+                        </Button>
+                        <Button 
+                          size="sm" 
+                          variant="outline" 
+                          onClick={() => handleExportCSV(student)}
+                        >
+                          <Download className="w-4 h-4 mr-1" />
+                          Export CSV
                         </Button>
                       </div>
                     </div>
                   ))}
-
                   {studentsWithViolations.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground">
-                      No students with violations
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Violations List */}
-            <Card className="mt-6">
-              <CardContent className="p-6">
-                <h2 className="text-xl font-bold mb-6">Recent Violations</h2>
-
-                <div className="space-y-4">
-                  {violations.slice(0, 5).map((violation) => (
-                    <div key={violation.id} className="border rounded-lg p-4">
-                      <div className="flex items-start gap-4">
-                        <div className="w-12 h-12 rounded-full bg-destructive/10 flex items-center justify-center flex-shrink-0">
-                          <AlertTriangle className="w-6 h-6 text-destructive" />
-                        </div>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-semibold capitalize">
-                              {violation.violation_type.replace(/_/g, ' ')}
-                            </h4>
-                            <Badge variant={violation.severity === 'high' ? 'destructive' : 'secondary'}>
-                              {violation.severity}
-                            </Badge>
-                          </div>
-                          {violation.exams?.exam_templates && (
-                            <p className="text-xs text-muted-foreground mb-1">
-                              <span className="font-medium">Subject:</span> {violation.exams.exam_templates.subject_name} ({violation.exams.exam_templates.subject_code})
-                            </p>
-                          )}
-                          <p className="text-sm text-muted-foreground mb-2">
-                            {violation.details?.message || 'No details'}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {formatDate(violation.timestamp)}
-                          </p>
-                          
-                          {violation.image_url && (
-                            <div className="mt-3 aspect-video rounded-lg overflow-hidden border">
-                              <img 
-                                src={violation.image_url} 
-                                alt={violation.violation_type}
-                                className="w-full h-full object-cover"
-                                onError={(e) => {
-                                  e.currentTarget.src = '/placeholder.svg';
-                                }}
-                              />
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-
-                  {violations.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground">
-                      No violations recorded
+                      No violations detected yet
                     </div>
                   )}
                 </div>
@@ -544,26 +531,24 @@ const AdminDashboard = () => {
             </Card>
           </div>
 
-          {/* Live Alerts */}
+          {/* Recent Activity */}
           <div>
-            <Card className="sticky top-4">
+            <Card>
               <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <Activity className="w-5 h-5" />
-                    <h3 className="font-bold">Live Alerts</h3>
-                  </div>
-                  <Badge variant="destructive">LIVE</Badge>
-                </div>
-                
-                <div className="flex flex-col items-center justify-center py-12">
-                  <Activity className="w-16 h-16 text-muted-foreground mb-4" />
-                  <p className="text-center text-muted-foreground">
-                    Monitoring for violations...
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-2">
-                    Live alerts will appear here
-                  </p>
+                <h2 className="text-xl font-bold mb-6">Recent Activity</h2>
+                <div className="space-y-3">
+                  {violations.slice(0, 10).map((violation) => (
+                    <div key={violation.id} className="text-sm border-l-2 border-red-500 pl-3 py-1">
+                      <p className="font-medium">{violation.students?.name || 'Unknown'}</p>
+                      <p className="text-muted-foreground">
+                        {getViolationTypeIcon(violation.violation_type)} {violation.violation_type.replace(/_/g, ' ')}
+                      </p>
+                      <p className="text-xs text-muted-foreground">{formatDate(violation.timestamp)}</p>
+                    </div>
+                  ))}
+                  {violations.length === 0 && (
+                    <p className="text-center text-muted-foreground py-8">No recent activity</p>
+                  )}
                 </div>
               </CardContent>
             </Card>

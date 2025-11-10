@@ -57,11 +57,11 @@ const StudentVerify = () => {
 
       streamRef.current = stream;
       setChecks(prev => ({ ...prev, camera: { status: 'success', message: 'Camera connected' } }));
-      setProgress(25);
+      setProgress(20);
 
       // Microphone check
       setChecks(prev => ({ ...prev, microphone: { status: 'success', message: 'Microphone connected' } }));
-      setProgress(35);
+      setProgress(40);
 
       // Step 2: Initialize AI Detection
       console.log('Initializing AI models...');
