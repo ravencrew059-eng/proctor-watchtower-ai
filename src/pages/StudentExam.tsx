@@ -7,8 +7,6 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { aiDetector } from "@/utils/aiDetection";
-import { violationLogger } from "@/utils/violationLogger";
 import { useProctoringWebSocket } from "@/hooks/useProctoringWebSocket";
 import { AudioMonitor } from "@/components/AudioMonitor";
 import { BrowserActivityMonitor } from "@/components/BrowserActivityMonitor";
@@ -35,7 +33,7 @@ const StudentExam = () => {
   const analyserRef = useRef<AnalyserNode | null>(null);
 
   // WebSocket connection for Python backend
-  const { isConnected: wsConnected, sendFrame, sendAudioLevel } = useProctoringWebSocket({
+  const { isConnected: wsConnected, sendFrame } = useProctoringWebSocket({
     sessionId: examId || '',
     examId: examId || '',
     studentId: studentData?.id || '',
@@ -43,37 +41,55 @@ const StudentExam = () => {
     calibratedPitch,
     calibratedYaw,
     onViolation: async (violation) => {
-      // Handle violation from Python backend
+      // Handle AI-detected violation from Python backend
       setViolationCount(prev => prev + 1);
-      const message = violation.type.replace(/_/g, ' ');
+      const message = violation.message || violation.type.replace(/_/g, ' ');
       setRecentWarnings(prev => [message, ...prev].slice(0, 3));
       toast.error(`Violation: ${message}`);
 
-      // Upload snapshot if available
+      // Upload snapshot ONLY for AI-detected violations (not browser activity)
       if (violation.snapshot_base64 && examId && studentData) {
         try {
-          const imageUrl = await violationLogger.uploadSnapshot(
-            examId,
-            studentData.id,
-            studentData.name,
-            violation.snapshot_base64,
-            violation.type
-          );
+          // Convert base64 to blob
+          const byteString = atob(violation.snapshot_base64.split(',')[1]);
+          const mimeString = violation.snapshot_base64.split(',')[0].split(':')[1].split(';')[0];
+          const ab = new ArrayBuffer(byteString.length);
+          const ia = new Uint8Array(ab);
+          for (let i = 0; i < byteString.length; i++) {
+            ia[i] = byteString.charCodeAt(i);
+          }
+          const blob = new Blob([ab], { type: mimeString });
 
-          // Log to database
+          // Upload to Supabase Storage
+          const fileName = `${examId}_${studentData.id}_${Date.now()}_${violation.type}.jpg`;
+          const { data: uploadData, error: uploadError } = await supabase.storage
+            .from('violation-evidence')
+            .upload(fileName, blob, {
+              contentType: 'image/jpeg',
+              cacheControl: '3600',
+            });
+
+          if (uploadError) throw uploadError;
+
+          // Get public URL
+          const { data: { publicUrl } } = supabase.storage
+            .from('violation-evidence')
+            .getPublicUrl(fileName);
+
+          // Log to database with image
           await supabase.from('violations').insert({
             exam_id: examId,
             student_id: studentData.id,
             violation_type: violation.type,
-            severity: violation.severity,
-            image_url: imageUrl,
+            severity: violation.severity || 'medium',
+            image_url: publicUrl,
             details: {
               message: violation.message,
               confidence: violation.confidence,
             },
           });
         } catch (error) {
-          console.error('Error logging violation:', error);
+          console.error('Error logging violation with snapshot:', error);
         }
       }
     },
@@ -108,37 +124,50 @@ const StudentExam = () => {
     const handleVisibilityChange = () => {
       if (document.hidden && examId && studentData) {
         setTabSwitchCount(prev => prev + 1);
-        recordViolation('tab_switch', 'Tab switched');
+        recordBrowserViolation('tab_switch', 'Tab switched');
         setRecentWarnings(prev => ['Tab switching detected', ...prev].slice(0, 3));
       }
       setWindowFocused(!document.hidden);
     };
 
-    const handleCopyPaste = (e: Event) => {
+    const handleCopy = (e: ClipboardEvent) => {
       e.preventDefault();
       if (examId && studentData) {
         setCopyPasteCount(prev => prev + 1);
-        recordViolation('copy_paste', 'Copy/paste attempted');
-        setRecentWarnings(prev => ['Copy/paste detected', ...prev].slice(0, 3));
+        recordBrowserViolation('copy_detected', 'Copy attempted');
+        setRecentWarnings(prev => ['Copy detected', ...prev].slice(0, 3));
+        toast.warning('Copy action detected');
+      }
+    };
+
+    const handlePaste = (e: ClipboardEvent) => {
+      e.preventDefault();
+      if (examId && studentData) {
+        setCopyPasteCount(prev => prev + 1);
+        recordBrowserViolation('paste_detected', 'Paste attempted');
+        setRecentWarnings(prev => ['Paste detected', ...prev].slice(0, 3));
+        toast.warning('Paste action detected');
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
-    document.addEventListener('copy', handleCopyPaste);
-    document.addEventListener('paste', handleCopyPaste);
+    document.addEventListener('copy', handleCopy as any);
+    document.addEventListener('paste', handlePaste as any);
 
     return () => {
       clearInterval(timer);
       document.removeEventListener('visibilitychange', handleVisibilityChange);
-      document.removeEventListener('copy', handleCopyPaste);
-      document.removeEventListener('paste', handleCopyPaste);
+      document.removeEventListener('copy', handleCopy as any);
+      document.removeEventListener('paste', handlePaste as any);
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
       if (detectionIntervalRef.current) {
         clearInterval(detectionIntervalRef.current);
       }
-      aiDetector.cleanup();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+      }
     };
   }, [navigate]);
 
@@ -171,7 +200,6 @@ const StudentExam = () => {
         setCalibratedYaw(yaw);
       }
 
-      await aiDetector.initialize();
       startAIMonitoring();
     } catch (error) {
       console.error('Camera error:', error);
@@ -179,81 +207,41 @@ const StudentExam = () => {
     }
   };
 
+  const captureSnapshot = (videoElement: HTMLVideoElement): string => {
+    const canvas = document.createElement('canvas');
+    canvas.width = videoElement.videoWidth;
+    canvas.height = videoElement.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (ctx) {
+      ctx.drawImage(videoElement, 0, 0);
+      return canvas.toDataURL('image/jpeg', 0.8);
+    }
+    return '';
+  };
+
   const startAIMonitoring = () => {
     detectionIntervalRef.current = setInterval(async () => {
-      if (!videoRef.current || !streamRef.current || !examId || !studentData) return;
+      if (!videoRef.current || !streamRef.current || !examId || !studentData || !wsConnected) return;
 
       try {
-        // Capture frame and send to Python backend via WebSocket
-        if (wsConnected) {
-          const snapshot = aiDetector.captureSnapshot(videoRef.current);
-          
-          // Get audio level
-          let audioLevel = 0;
-          if (analyserRef.current) {
-            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-            analyserRef.current.getByteFrequencyData(dataArray);
-            audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
-          }
-
-          // Send frame to Python backend
-          sendFrame(snapshot, audioLevel);
-
-          // Also send audio level separately
-          if (audioLevel > 0) {
-            sendAudioLevel(audioLevel);
-          }
-        } else {
-          // Fallback to local detection if WebSocket not connected
-          const violations = await aiDetector.detectObjects(videoRef.current);
-          
-          for (const violation of violations) {
-            const snapshot = aiDetector.captureSnapshot(videoRef.current);
-            
-            await violationLogger.logDetectionViolation(
-              examId,
-              studentData.id,
-              studentData.name,
-              violation,
-              snapshot
-            );
-
-            setViolationCount(prev => prev + 1);
-            const message = violation.type.replace(/_/g, ' ');
-            setRecentWarnings(prev => [message, ...prev].slice(0, 3));
-            
-            toast.error(`Violation: ${message}`);
-          }
-
-          // Check audio level locally
-          if (analyserRef.current) {
-            const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
-            analyserRef.current.getByteFrequencyData(dataArray);
-            const currentAudioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
-            setAudioLevel(currentAudioLevel);
-
-            if (currentAudioLevel > 50) {
-              const shouldLog = aiDetector.incrementViolation('audioNoise');
-              if (shouldLog) {
-                const snapshot = aiDetector.captureSnapshot(videoRef.current);
-                await violationLogger.logDetectionViolation(
-                  examId,
-                  studentData.id,
-                  studentData.name,
-                  { type: 'audio_noise', confidence: 0.8, timestamp: new Date() },
-                  snapshot
-                );
-                setViolationCount(prev => prev + 1);
-                setRecentWarnings(prev => ['Suspicious audio', ...prev].slice(0, 3));
-                aiDetector.resetViolation('audioNoise');
-              }
-            }
-          }
+        // Capture frame and audio level
+        const snapshot = captureSnapshot(videoRef.current);
+        
+        // Get audio level
+        let audioLevel = 0;
+        if (analyserRef.current) {
+          const dataArray = new Uint8Array(analyserRef.current.frequencyBinCount);
+          analyserRef.current.getByteFrequencyData(dataArray);
+          audioLevel = dataArray.reduce((a, b) => a + b) / dataArray.length;
+          setAudioLevel(audioLevel); // Update audio level in real-time
         }
+
+        // Send frame to Python backend via WebSocket
+        sendFrame(snapshot, audioLevel);
       } catch (error) {
         console.error('AI monitoring error:', error);
       }
-    }, 2000);
+    }, 2000); // Every 2 seconds
   };
 
   const loadExamQuestions = async () => {
@@ -330,36 +318,24 @@ const StudentExam = () => {
     }
   };
 
-  const recordViolation = async (type: string, details: string) => {
+  // Record browser activity violations (NO snapshots for these)
+  const recordBrowserViolation = async (type: string, details: string) => {
     if (!examId || !studentData) return;
 
     try {
-      const snapshot = videoRef.current ? aiDetector.captureSnapshot(videoRef.current) : '';
-      
-      if (snapshot) {
-        await violationLogger.logDetectionViolation(
-          examId,
-          studentData.id,
-          studentData.name,
-          { type: type as any, confidence: 1.0, timestamp: new Date() },
-          snapshot
-        );
-      } else {
-        await supabase
-          .from('violations')
-          .insert({
-            exam_id: examId,
-            student_id: studentData.id,
-            violation_type: type,
-            severity: 'medium',
-            details: { message: details }
-          });
-      }
+      await supabase
+        .from('violations')
+        .insert({
+          exam_id: examId,
+          student_id: studentData.id,
+          violation_type: type,
+          severity: 'low',
+          details: { message: details }
+        });
 
       setViolationCount(prev => prev + 1);
-      toast.warning("Violation recorded: " + details);
     } catch (error) {
-      console.error('Error recording violation:', error);
+      console.error('Error recording browser violation:', error);
     }
   };
 

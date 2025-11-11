@@ -1,5 +1,4 @@
 import { supabase } from '@/integrations/supabase/client';
-import { DetectionResult } from './aiDetection';
 
 export interface ViolationLog {
   examId: string;
@@ -80,7 +79,7 @@ export class ViolationLogger {
     examId: string,
     studentId: string,
     studentName: string,
-    detection: DetectionResult,
+    detection: any,
     snapshot: string
   ) {
     try {

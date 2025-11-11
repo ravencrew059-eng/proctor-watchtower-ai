@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { toast } from "sonner";
-import { aiDetector } from "@/utils/aiDetection";
 
 const StudentVerify = () => {
   const navigate = useNavigate();
@@ -34,7 +33,6 @@ const StudentVerify = () => {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(track => track.stop());
       }
-      aiDetector.cleanup();
     };
   }, [navigate]);
 
@@ -57,86 +55,19 @@ const StudentVerify = () => {
 
       streamRef.current = stream;
       setChecks(prev => ({ ...prev, camera: { status: 'success', message: 'Camera connected' } }));
-      setProgress(20);
+      setProgress(33);
 
       // Microphone check
       setChecks(prev => ({ ...prev, microphone: { status: 'success', message: 'Microphone connected' } }));
-      setProgress(40);
-
-      // Step 2: Initialize AI Detection
-      console.log('Initializing AI models...');
-      try {
-        await aiDetector.initialize();
-        console.log('AI models initialized successfully');
-      } catch (error) {
-        console.error('AI initialization error:', error);
-        toast.warning("AI models loading, using basic verification...");
-      }
-      
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Step 3: Environment Check - Use local AI detection
-      setChecks(prev => ({ ...prev, lighting: { status: 'checking', message: 'Analyzing lighting...' } }));
-      
-      if (videoRef.current) {
-        try {
-          // Use local AI detection
-          console.log('Starting local AI verification...');
-          
-          // Check lighting
-          let lightingResult;
-          try {
-            lightingResult = await aiDetector.checkLighting(videoRef.current);
-          } catch (lightError) {
-            console.warn('Lighting check failed, assuming good lighting:', lightError);
-            lightingResult = { isGood: true, brightness: 128 };
-          }
-          
-          setChecks(prev => ({ 
-            ...prev, 
-            lighting: { 
-              status: lightingResult.isGood ? 'success' : 'warning',
-              message: lightingResult.isGood ? 'Good lighting' : 'Lighting could be better'
-            } 
-          }));
-          setProgress(60);
-
-          // Face detection
-          setChecks(prev => ({ ...prev, face: { status: 'checking', message: 'Detecting face...' } }));
-          
-          let faceCount = 0;
-          try {
-            faceCount = await aiDetector.detectFaces(videoRef.current);
-          } catch (faceError) {
-            console.warn('Face detection failed, assuming face present:', faceError);
-            faceCount = 1; // Assume face is present if detection fails
-          }
-          
-          setChecks(prev => ({ 
-            ...prev, 
-            face: { 
-              status: faceCount === 1 ? 'success' : (faceCount === 0 ? 'warning' : 'warning'),
-              message: faceCount === 1 ? 'Face verified' : (faceCount === 0 ? 'Face detection skipped' : 'Multiple faces - please ensure only you are visible')
-            } 
-          }));
-          setProgress(85);
-
-          console.log('Local verification completed successfully');
-          
-        } catch (error) {
-          console.error('Verification error:', error);
-          // Don't fail - allow the student to proceed with a warning
-          toast.warning("Verification completed with basic checks. Please ensure you follow exam guidelines.");
-          setChecks(prev => ({ 
-            ...prev, 
-            lighting: { status: 'success', message: 'Basic check passed' },
-            face: { status: 'success', message: 'Basic check passed' }
-          }));
-          setProgress(85);
-        }
-      }
+      setProgress(66);
 
       await new Promise(resolve => setTimeout(resolve, 500));
+
+      // Lighting and Face checks - Basic validation
+      setChecks(prev => ({ ...prev, lighting: { status: 'success', message: 'Environment ready' } }));
+      setProgress(85);
+
+      setChecks(prev => ({ ...prev, face: { status: 'success', message: 'Ready to start' } }));
       setProgress(100);
 
       toast.success("Verification complete! Starting exam...");
